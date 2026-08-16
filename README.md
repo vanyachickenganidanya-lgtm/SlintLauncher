@@ -20,10 +20,20 @@
 - 🌍 **Русский и английский** интерфейс, тёмная и светлая темы.
 - 🪶 Один самодостаточный бинарник, без Electron и без Qt.
 
-## Скачать / Download
+## Сборка в GitHub Actions / CI
 
-Готовые сборки для **Windows** и **Linux** появляются в артефактах GitHub Actions:
-**[Actions → Build](../../actions/workflows/build.yml)** → последний успешный запуск → раздел *Artifacts*.
+> ⚠️ **Один ручной шаг.** Workflow лежит в [`ci/build.yml`](ci/build.yml), а не в
+> `.github/workflows/`, потому что токен бота не имеет права `workflows`.
+> Чтобы включить автосборку, выполните один раз:
+>
+> ```bash
+> git checkout arena/01a00a73-slintlauncher
+> mkdir -p .github/workflows && git mv ci/build.yml .github/workflows/build.yml
+> git commit -m "Enable CI" && git push
+> ```
+
+После этого сборки для **Windows** и **Linux** появятся в
+**Actions → Build** → последний запуск → раздел *Artifacts*.
 
 | Платформа | Артефакт |
 |---|---|
@@ -54,6 +64,16 @@ git clone https://github.com/vanyachickenganidanya-lgtm/SlintLauncher
 cd SlintLauncher
 cargo build --release
 ./target/release/slint-launcher
+```
+
+### Проверка интерфейса без Rust
+
+Компилятор Slint доступен и в виде Python-пакета, поэтому синтаксис UI и
+соответствие имён между Rust и Slint можно проверить без сборки всего проекта:
+
+```bash
+pip install slint
+python3 tools/check_ui.py
 ```
 
 ### Зависимости Linux
