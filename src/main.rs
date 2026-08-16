@@ -10,118 +10,69 @@ use config::{Account, Instance, Settings, Store};
 use minecraft::install::{self, Paths, Reporter};
 use minecraft::launch;
 use minecraft::manifest::ManifestEntry;
-use slint::{ComponentHandle, Model, ModelRc, SharedString, VecModel, Weak};
+use slint::{ComponentHandle, Model, ModelRc, SharedString, Timer, TimerMode, VecModel};
+use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 slint::include_modules!();
 
 const MAX_LOG_LINES: usize = 4000;
+const TICK: Duration = Duration::from_millis(120);
 
-/// Everything the worker threads need to touch, behind one lock.
+/// Shared, thread-safe launcher state. Worker threads only ever touch this and
+/// the message queues below; all UI updates happen on the event loop timer.
 struct AppState {
     store: Store,
-    paths: Paths,
+    root: std::path::PathBuf,
     versions: Vec<ManifestEntry>,
     running: HashMap<String, u32>,
-    heads: HashMap<String, slint::Image>,
     busy: bool,
 }
 
-type Shared = Arc<Mutex<AppState>>;
-
-fn main() -> Result<(), slint::PlatformError> {
-    let root = util::data_dir();
-    let _ = std::fs::create_dir_all(&root);
-
-    let store = Store::load();
-    let state: Shared = Arc::new(Mutex::new(AppState {
-        store,
-        paths: Paths::new(root.clone()),
-        versions: Vec::new(),
-        running: HashMap::new(),
-        heads: HashMap::new(),
-        busy: false,
-    }));
-
-    let ui = AppWindow::new()?;
-    ui.set_app_version(env!("CARGO_PKG_VERSION").into());
-    ui.set_data_dir(root.display().to_string().into());
-
-    // apply persisted settings to the UI
-    {
-        let guard = state.lock().unwrap();
-        let s = &guard.store.settings;
-        ui.set_java_path(s.java_path.clone().into());
-        ui.set_max_memory(s.max_memory as i32);
-        ui.set_jvm_args(s.jvm_args.clone().into());
-        ui.set_win_width(s.window_width as i32);
-        ui.set_win_height(s.window_height as i32);
-        ui.set_fullscreen(s.fullscreen);
-        ui.set_hide_launcher(s.hide_launcher);
-        ui.set_auto_java(s.auto_java);
-        ui.global::<Tr>().set_ru(s.russian);
-        ui.global::<Theme>().set_light(s.light_theme);
-    }
-
-    ui.set_log_lines(ModelRc::new(VecModel::<LogLine>::default()));
-    ui.set_instances(ModelRc::new(VecModel::<InstanceItem>::default()));
-    ui.set_accounts(ModelRc::new(VecModel::<AccountItem>::default()));
-    ui.set_versions(ModelRc::new(VecModel::<VersionItem>::default()));
-
-    refresh_instances(&ui, &state);
-    refresh_accounts(&ui, &state);
-
-    log_line(&ui, "info", &format!("SlintLauncher v{}", env!("CARGO_PKG_VERSION")));
-    log_line(&ui, "info", &format!("Данные / Data: {}", root.display()));
-
-    // Detect Java in the background so the settings page has something to show.
-    {
-        let weak = ui.as_weak();
-        let state = state.clone();
-        std::thread::spawn(move || {
-            let configured = state.lock().unwrap().store.settings.java_path.clone();
-            let found = launch::detect_java(&configured);
-            let text = match &found {
-                Some(path) => format!("{} — {}", path.display(), launch::java_version_string(path)),
-                None => "Java не найдена / Java not found".to_string(),
-            };
-            let _ = weak.upgrade_in_event_loop(move |ui| {
-                ui.set_detected_java(text.clone().into());
-                log_line(&ui, if text.contains("not found") { "warn" } else { "ok" }, &format!("Java: {text}"));
-            });
-        });
-    }
-
-    // Load skins for stored Ely.by accounts.
-    load_heads(&ui, &state);
-
-    install_callbacks(&ui, &state);
-
-    ui.run()
+/// Messages produced by worker threads and drained on the UI thread.
+#[derive(Default)]
+struct Outbox {
+    logs: Vec<(String, String)>,
+    status: Option<(bool, String, f32)>,
+    toast: Option<String>,
+    /// (account id, skin PNG)
+    skins: Vec<(String, Vec<u8>)>,
+    refresh_instances: bool,
+    refresh_accounts: bool,
+    open_login: bool,
+    minimize: Option<bool>,
+    login: Option<LoginUpdate>,
+    versions: Option<VersionsUpdate>,
+    java: Option<String>,
 }
+
+struct LoginUpdate {
+    busy: bool,
+    needs_totp: bool,
+    error: String,
+    close: bool,
+}
+
+struct VersionsUpdate {
+    items: Vec<VersionItem>,
+    loading: bool,
+    error: String,
+}
+
+type Shared = Arc<Mutex<AppState>>;
+type Mail = Arc<Mutex<Outbox>>;
 
 // ------------------------------------------------------------------ helpers
 
-fn log_line(ui: &AppWindow, level: &str, text: &str) {
-    let model = ui.get_log_lines();
-    let Some(vec_model) = model.as_any().downcast_ref::<VecModel<LogLine>>() else {
-        return;
-    };
-    let stamp = timestamp();
-    vec_model.push(LogLine {
-        level: level.into(),
-        text: format!("[{stamp}] {text}").into(),
-    });
-    while vec_model.row_count() > MAX_LOG_LINES {
-        vec_model.remove(0);
-    }
+fn push_log(mail: &Mail, level: &str, text: impl Into<String>) {
+    mail.lock().unwrap().logs.push((level.to_string(), text.into()));
 }
 
-fn log_from_thread(weak: &Weak<AppWindow>, level: &str, text: String) {
-    let level = level.to_string();
-    let _ = weak.upgrade_in_event_loop(move |ui| log_line(&ui, &level, &text));
+fn set_status(mail: &Mail, busy: bool, text: impl Into<String>, progress: f32) {
+    mail.lock().unwrap().status = Some((busy, text.into(), progress));
 }
 
 fn timestamp() -> String {
@@ -139,9 +90,9 @@ fn today() -> String {
     let days = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_secs() / 86400)
-        .unwrap_or(0);
-    // civil-from-days (Howard Hinnant's algorithm)
-    let z = days as i64 + 719468;
+        .unwrap_or(0) as i64;
+    // civil_from_days (Howard Hinnant)
+    let z = days + 719468;
     let era = z.div_euclid(146097);
     let doe = z.rem_euclid(146097);
     let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
@@ -151,7 +102,7 @@ fn today() -> String {
     let d = doy - (153 * mp + 2) / 5 + 1;
     let m = if mp < 10 { mp + 3 } else { mp - 9 };
     let y = if m <= 2 { y + 1 } else { y };
-    format!("{:04}-{:02}-{:02}", y, m, d)
+    format!("{y:04}-{m:02}-{d:02}")
 }
 
 fn hue_for(text: &str) -> f32 {
@@ -163,17 +114,41 @@ fn hue_for(text: &str) -> f32 {
     (h % 360) as f32
 }
 
-fn icon_text(name: &str) -> String {
-    name.chars()
-        .filter(|c| c.is_alphanumeric())
-        .take(2)
-        .collect::<String>()
-        .to_uppercase()
+fn initials(name: &str) -> String {
+    let letters: String = name.chars().filter(|c| c.is_alphanumeric()).take(2).collect();
+    if letters.is_empty() {
+        "?".to_string()
+    } else {
+        letters.to_uppercase()
+    }
+}
+
+fn first_letter(name: &str) -> String {
+    match name.chars().find(|c| c.is_alphanumeric()) {
+        Some(c) => c.to_uppercase().to_string(),
+        None => "?".to_string(),
+    }
+}
+
+type Heads = Rc<RefCell<HashMap<String, slint::Image>>>;
+
+fn append_log(ui: &AppWindow, level: &str, text: &str) {
+    let model = ui.get_log_lines();
+    let Some(vec_model) = model.as_any().downcast_ref::<VecModel<LogLine>>() else {
+        return;
+    };
+    vec_model.push(LogLine {
+        level: level.into(),
+        text: format!("[{}] {}", timestamp(), text).into(),
+    });
+    while vec_model.row_count() > MAX_LOG_LINES {
+        vec_model.remove(0);
+    }
 }
 
 fn refresh_instances(ui: &AppWindow, state: &Shared) {
     let guard = state.lock().unwrap();
-    let paths = &guard.paths;
+    let paths = Paths::new(guard.root.clone());
     let items: Vec<InstanceItem> = guard
         .store
         .instances
@@ -187,39 +162,42 @@ fn refresh_instances(ui: &AppWindow, state: &Shared) {
             running: guard.running.contains_key(&i.id),
             last_played: i.last_played.clone().into(),
             hue: hue_for(&i.name),
-            icon_text: icon_text(&i.name).into(),
+            icon_text: initials(&i.name).into(),
         })
         .collect();
     ui.set_instances(ModelRc::new(VecModel::from(items)));
 }
 
-fn refresh_accounts(ui: &AppWindow, state: &Shared) {
+fn refresh_accounts(ui: &AppWindow, state: &Shared, heads: &Heads) {
     let guard = state.lock().unwrap();
+    let heads = heads.borrow();
     let active_id = guard.store.active_account.clone();
-    let empty = slint::Image::default();
+    let blank = slint::Image::default();
 
     let items: Vec<AccountItem> = guard
         .store
         .accounts
         .iter()
         .map(|a| {
-            let head = guard.heads.get(&a.id).cloned();
+            let head = heads.get(&a.id).cloned();
             AccountItem {
                 id: a.id.clone().into(),
                 username: a.username.clone().into(),
                 uuid: a.uuid.clone().into(),
                 kind: a.kind.clone().into(),
+                initial: first_letter(&a.username).into(),
                 active: a.id == active_id,
                 has_head: head.is_some(),
-                head: head.unwrap_or_else(|| empty.clone()),
+                head: head.unwrap_or_else(|| blank.clone()),
             }
         })
         .collect();
 
     let active = guard.store.active();
     ui.set_active_account(active.map(|a| a.username.clone()).unwrap_or_default().into());
+    ui.set_active_initial(active.map(|a| first_letter(&a.username)).unwrap_or_else(|| "?".into()).into());
     ui.set_active_is_ely(active.map(|a| a.is_ely()).unwrap_or(false));
-    match active.and_then(|a| guard.heads.get(&a.id).cloned()) {
+    match active.and_then(|a| heads.get(&a.id).cloned()) {
         Some(head) => {
             ui.set_active_head(head);
             ui.set_active_has_head(true);
@@ -230,59 +208,30 @@ fn refresh_accounts(ui: &AppWindow, state: &Shared) {
     ui.set_accounts(ModelRc::new(VecModel::from(items)));
 }
 
-fn load_heads(ui: &AppWindow, state: &Shared) {
-    let accounts: Vec<Account> = {
+/// Kick off skin downloads for Ely.by accounts that don't have a head yet.
+fn fetch_missing_skins(state: &Shared, mail: &Mail, heads: &Heads) {
+    let known: Vec<String> = heads.borrow().keys().cloned().collect();
+    let todo: Vec<(String, String)> = {
         let guard = state.lock().unwrap();
         guard
             .store
             .accounts
             .iter()
-            .filter(|a| a.is_ely() && !guard.heads.contains_key(&a.id))
-            .cloned()
+            .filter(|a| a.is_ely() && !known.contains(&a.id))
+            .map(|a| (a.id.clone(), a.username.clone()))
             .collect()
     };
-    if accounts.is_empty() {
+    if todo.is_empty() {
         return;
     }
 
-    let weak = ui.as_weak();
-    let state = state.clone();
+    let mail = mail.clone();
     std::thread::spawn(move || {
-        for account in accounts {
-            let Ok(png) = ely::fetch_skin(&account.username) else {
-                continue;
-            };
-            let weak = weak.clone();
-            let state = state.clone();
-            let id = account.id.clone();
-            let _ = slint::invoke_from_event_loop(move || {
-                if let Ok(head) = skin::head_from_skin(&png) {
-                    state.lock().unwrap().heads.insert(id, head);
-                    if let Some(ui) = weak.upgrade() {
-                        refresh_accounts(&ui, &state);
-                    }
-                }
-            });
-        }
-    });
-}
-
-fn set_busy(ui: &AppWindow, busy: bool, text: &str, progress: f32) {
-    ui.set_busy(busy);
-    ui.set_status_text(text.into());
-    ui.set_progress(progress);
-}
-
-fn toast(weak: &Weak<AppWindow>, text: String) {
-    let w = weak.clone();
-    let _ = weak.upgrade_in_event_loop(move |ui| {
-        ui.set_toast(text.clone().into());
-        let w2 = w.clone();
-        slint::Timer::single_shot(std::time::Duration::from_secs(3), move || {
-            if let Some(ui) = w2.upgrade() {
-                ui.set_toast(SharedString::new());
+        for (id, username) in todo {
+            if let Ok(png) = ely::fetch_skin(&username) {
+                mail.lock().unwrap().skins.push((id, png));
             }
-        });
+        }
     });
 }
 
@@ -292,21 +241,179 @@ fn save_store(state: &Shared) {
     }
 }
 
-// -------------------------------------------------------------- callbacks
+// --------------------------------------------------------------------- main
 
-fn install_callbacks(ui: &AppWindow, state: &Shared) {
-    // ---------------------------------------------------------- versions
+fn main() -> Result<(), slint::PlatformError> {
+    let root = util::data_dir();
+    let _ = std::fs::create_dir_all(&root);
+
+    let state: Shared = Arc::new(Mutex::new(AppState {
+        store: Store::load(),
+        root: root.clone(),
+        versions: Vec::new(),
+        running: HashMap::new(),
+        busy: false,
+    }));
+    let mail: Mail = Arc::new(Mutex::new(Outbox::default()));
+    let heads: Heads = Rc::new(RefCell::new(HashMap::new()));
+
+    let ui = AppWindow::new()?;
+    ui.set_app_version(env!("CARGO_PKG_VERSION").into());
+    ui.set_data_dir(root.display().to_string().into());
+    ui.set_log_lines(ModelRc::new(VecModel::<LogLine>::default()));
+    ui.set_instances(ModelRc::new(VecModel::<InstanceItem>::default()));
+    ui.set_accounts(ModelRc::new(VecModel::<AccountItem>::default()));
+    ui.set_versions(ModelRc::new(VecModel::<VersionItem>::default()));
+
+    {
+        let guard = state.lock().unwrap();
+        let s = &guard.store.settings;
+        ui.set_java_path(s.java_path.clone().into());
+        ui.set_max_memory(s.max_memory as i32);
+        ui.set_jvm_args(s.jvm_args.clone().into());
+        ui.set_win_width(s.window_width as i32);
+        ui.set_win_height(s.window_height as i32);
+        ui.set_fullscreen(s.fullscreen);
+        ui.set_hide_launcher(s.hide_launcher);
+        ui.set_auto_java(s.auto_java);
+        ui.global::<Tr>().set_ru(s.russian);
+        ui.global::<Theme>().set_light(s.light_theme);
+    }
+
+    refresh_instances(&ui, &state);
+    refresh_accounts(&ui, &state, &heads);
+
+    append_log(&ui, "info", &format!("SlintLauncher v{}", env!("CARGO_PKG_VERSION")));
+    append_log(&ui, "info", &format!("Данные / Data: {}", root.display()));
+
+    // background Java probe
+    {
+        let state = state.clone();
+        let mail = mail.clone();
+        std::thread::spawn(move || {
+            let configured = state.lock().unwrap().store.settings.java_path.clone();
+            let text = match launch::detect_java(&configured) {
+                Some(path) => format!("{} — {}", path.display(), launch::java_version_string(&path)),
+                None => "Java не найдена / Java not found".to_string(),
+            };
+            let found = !text.contains("not found");
+            let mut out = mail.lock().unwrap();
+            out.java = Some(text.clone());
+            out.logs.push((
+                if found { "ok".into() } else { "warn".into() },
+                format!("Java: {text}"),
+            ));
+        });
+    }
+
+    fetch_missing_skins(&state, &mail, &heads);
+    install_callbacks(&ui, &state, &mail);
+
+    // Single UI-thread pump: drains worker messages into the widgets.
+    let pump = Timer::default();
     {
         let weak = ui.as_weak();
+        let mail = mail.clone();
         let state = state.clone();
-        ui.on_refresh_versions(move |snapshots, old| {
-            let weak = weak.clone();
-            let state = state.clone();
+        let heads = heads.clone();
+        let mut toast_ticks: i32 = 0;
 
-            if let Some(ui) = weak.upgrade() {
-                ui.set_versions_loading(true);
-                ui.set_versions_error(SharedString::new());
+        pump.start(TimerMode::Repeated, TICK, move || {
+            let Some(ui) = weak.upgrade() else { return };
+            let batch = std::mem::take(&mut *mail.lock().unwrap());
+
+            for (level, text) in &batch.logs {
+                append_log(&ui, level, text);
             }
+
+            if let Some((busy, text, progress)) = batch.status {
+                ui.set_busy(busy);
+                ui.set_status_text(text.into());
+                ui.set_progress(progress);
+            }
+
+            if let Some(text) = batch.toast {
+                ui.set_toast(text.into());
+                toast_ticks = 25;
+            } else if toast_ticks > 0 {
+                toast_ticks -= 1;
+                if toast_ticks == 0 {
+                    ui.set_toast(SharedString::new());
+                }
+            }
+
+            let mut accounts_dirty = batch.refresh_accounts;
+            for (id, png) in &batch.skins {
+                if let Ok(head) = skin::head_from_skin(png) {
+                    heads.borrow_mut().insert(id.clone(), head);
+                    accounts_dirty = true;
+                }
+            }
+
+            if batch.refresh_instances {
+                refresh_instances(&ui, &state);
+            }
+            if accounts_dirty {
+                refresh_accounts(&ui, &state, &heads);
+            }
+            if batch.open_login {
+                ui.set_show_login(true);
+            }
+            if let Some(minimized) = batch.minimize {
+                ui.window().set_minimized(minimized);
+            }
+            if let Some(java) = batch.java {
+                ui.set_detected_java(java.clone().into());
+                if ui.get_java_path().is_empty() {
+                    if let Some((path, _)) = java.split_once(" — ") {
+                        if !path.contains("not found") {
+                            ui.set_java_path(path.into());
+                        }
+                    }
+                }
+            }
+            if let Some(update) = batch.login {
+                ui.set_login_busy(update.busy);
+                ui.set_login_needs_totp(update.needs_totp);
+                ui.set_login_error(update.error.into());
+                if update.close {
+                    ui.set_show_login(false);
+                }
+            }
+            if let Some(update) = batch.versions {
+                ui.set_versions_loading(update.loading);
+                ui.set_versions_error(update.error.into());
+                if !update.items.is_empty() {
+                    let first = update.items[0].id.clone();
+                    ui.set_versions(ModelRc::new(VecModel::from(update.items)));
+                    if ui.get_new_instance_version().is_empty() {
+                        ui.set_new_instance_version(first);
+                    }
+                } else {
+                    ui.set_versions(ModelRc::new(VecModel::from(update.items)));
+                }
+            }
+        });
+    }
+
+    ui.run()
+}
+
+// -------------------------------------------------------------- callbacks
+
+fn install_callbacks(ui: &AppWindow, state: &Shared, mail: &Mail) {
+    // ---------------------------------------------------------- versions
+    {
+        let state = state.clone();
+        let mail = mail.clone();
+        ui.on_refresh_versions(move |snapshots, old| {
+            let state = state.clone();
+            let mail = mail.clone();
+            mail.lock().unwrap().versions = Some(VersionsUpdate {
+                items: Vec::new(),
+                loading: true,
+                error: String::new(),
+            });
 
             std::thread::spawn(move || {
                 let cached = state.lock().unwrap().versions.clone();
@@ -317,12 +424,10 @@ fn install_callbacks(ui: &AppWindow, state: &Shared) {
                             manifest.versions
                         }
                         Err(e) => {
-                            let msg = format!("{e:#}");
-                            let _ = weak.upgrade_in_event_loop(move |ui| {
-                                ui.set_versions_loading(false);
-                                ui.set_versions_error(
-                                    format!("Не удалось получить список версий / Cannot fetch versions: {msg}").into(),
-                                );
+                            mail.lock().unwrap().versions = Some(VersionsUpdate {
+                                items: Vec::new(),
+                                loading: false,
+                                error: format!("Не удалось получить список версий / Cannot fetch versions: {e:#}"),
                             });
                             return;
                         }
@@ -331,7 +436,7 @@ fn install_callbacks(ui: &AppWindow, state: &Shared) {
                     cached
                 };
 
-                let filtered: Vec<VersionItem> = list
+                let items: Vec<VersionItem> = list
                     .iter()
                     .filter(|v| match v.kind.as_str() {
                         "release" => true,
@@ -345,16 +450,10 @@ fn install_callbacks(ui: &AppWindow, state: &Shared) {
                     })
                     .collect();
 
-                let default_version = filtered.first().map(|v| v.id.clone());
-
-                let _ = weak.upgrade_in_event_loop(move |ui| {
-                    ui.set_versions(ModelRc::new(VecModel::from(filtered)));
-                    ui.set_versions_loading(false);
-                    if ui.get_new_instance_version().is_empty() {
-                        if let Some(v) = default_version {
-                            ui.set_new_instance_version(v);
-                        }
-                    }
+                mail.lock().unwrap().versions = Some(VersionsUpdate {
+                    items,
+                    loading: false,
+                    error: String::new(),
                 });
             });
         });
@@ -362,28 +461,24 @@ fn install_callbacks(ui: &AppWindow, state: &Shared) {
 
     // ---------------------------------------------------- create instance
     {
-        let weak = ui.as_weak();
         let state = state.clone();
+        let mail = mail.clone();
         ui.on_create_instance(move |name, version| {
-            let name = name.to_string();
-            let version = version.to_string();
-            if name.trim().is_empty() || version.is_empty() {
+            let (name, version) = (name.trim().to_string(), version.to_string());
+            if name.is_empty() || version.is_empty() {
                 return;
             }
 
             let id = uuid::Uuid::new_v4().to_string();
             let folder = util::sanitize_folder_name(&name);
-            let kind = state
-                .lock()
-                .unwrap()
-                .versions
-                .iter()
-                .find(|v| v.id == version)
-                .map(|v| v.kind.clone())
-                .unwrap_or_else(|| "release".into());
-
             {
                 let mut guard = state.lock().unwrap();
+                let kind = guard
+                    .versions
+                    .iter()
+                    .find(|v| v.id == version)
+                    .map(|v| v.kind.clone())
+                    .unwrap_or_else(|| "release".into());
                 guard.store.instances.push(Instance {
                     id: id.clone(),
                     name: name.clone(),
@@ -395,18 +490,16 @@ fn install_callbacks(ui: &AppWindow, state: &Shared) {
             }
             save_store(&state);
 
-            if let Some(ui) = weak.upgrade() {
-                refresh_instances(&ui, &state);
-                ui.set_selected_instance(id.into());
-                log_line(&ui, "ok", &format!("Создана сборка «{name}» ({version})"));
-            }
+            let mut out = mail.lock().unwrap();
+            out.refresh_instances = true;
+            out.logs.push(("ok".into(), format!("Создана сборка «{name}» ({version})")));
         });
     }
 
     // ---------------------------------------------------- delete instance
     {
-        let weak = ui.as_weak();
         let state = state.clone();
+        let mail = mail.clone();
         ui.on_delete_instance(move |id| {
             let id = id.to_string();
             let removed = {
@@ -415,7 +508,7 @@ fn install_callbacks(ui: &AppWindow, state: &Shared) {
                     None
                 } else if let Some(pos) = guard.store.instances.iter().position(|i| i.id == id) {
                     let inst = guard.store.instances.remove(pos);
-                    let dir = guard.paths.instances().join(&inst.folder);
+                    let dir = Paths::new(guard.root.clone()).instances().join(&inst.folder);
                     let _ = std::fs::remove_dir_all(dir);
                     Some(inst)
                 } else {
@@ -423,104 +516,95 @@ fn install_callbacks(ui: &AppWindow, state: &Shared) {
                 }
             };
             save_store(&state);
-            if let Some(ui) = weak.upgrade() {
-                refresh_instances(&ui, &state);
-                match removed {
-                    Some(inst) => log_line(&ui, "warn", &format!("Сборка «{}» удалена", inst.name)),
-                    None => log_line(&ui, "error", "Нельзя удалить запущенную сборку"),
-                }
+
+            let mut out = mail.lock().unwrap();
+            out.refresh_instances = true;
+            match removed {
+                Some(inst) => out.logs.push(("warn".into(), format!("Сборка «{}» удалена", inst.name))),
+                None => out.logs.push(("error".into(), "Нельзя удалить запущенную сборку".into())),
             }
         });
     }
 
-    // ------------------------------------------------------ open folder
+    // ------------------------------------------------------- open folder
     {
         let state = state.clone();
         ui.on_open_instance_folder(move |id| {
             let guard = state.lock().unwrap();
             if let Some(inst) = guard.store.instance(&id.to_string()) {
-                let dir = guard.paths.instances().join(&inst.folder);
+                let dir = Paths::new(guard.root.clone()).instances().join(&inst.folder);
                 let _ = std::fs::create_dir_all(&dir);
                 util::open_path(&dir.display().to_string());
             }
         });
     }
 
-    // ------------------------------------------------------------- play
+    // -------------------------------------------------------------- play
     {
-        let weak = ui.as_weak();
         let state = state.clone();
+        let mail = mail.clone();
         ui.on_play(move |id| {
             let id = id.to_string();
-            let weak = weak.clone();
             let state = state.clone();
+            let mail = mail.clone();
 
             {
-                let guard = state.lock().unwrap();
-                if guard.busy {
+                let mut guard = state.lock().unwrap();
+                if guard.busy || guard.running.contains_key(&id) {
                     return;
                 }
                 if guard.store.active().is_none() {
                     drop(guard);
-                    if let Some(ui) = weak.upgrade() {
-                        log_line(&ui, "error", "Сначала войдите в аккаунт / Sign in first");
-                        ui.invoke_open_login();
-                    }
+                    let mut out = mail.lock().unwrap();
+                    out.logs.push((
+                        "error".into(),
+                        "Сначала войдите в аккаунт / Sign in first".into(),
+                    ));
+                    out.open_login = true;
                     return;
                 }
+                guard.busy = true;
             }
 
-            state.lock().unwrap().busy = true;
-            if let Some(ui) = weak.upgrade() {
-                set_busy(&ui, true, "Подготовка / Preparing...", 0.0);
-            }
+            set_status(&mail, true, "Подготовка / Preparing...", 0.0);
 
             std::thread::spawn(move || {
-                let result = run_instance(&weak, &state, &id);
-                state.lock().unwrap().busy = false;
-
-                match result {
-                    Ok(()) => {}
-                    Err(e) => {
-                        let msg = format!("{e:#}");
-                        log_from_thread(&weak, "error", format!("Ошибка запуска / Launch failed: {msg}"));
-                        toast(&weak, "Ошибка запуска / Launch failed".into());
-                    }
+                if let Err(e) = run_instance(&state, &mail, &id) {
+                    push_log(&mail, "error", format!("Ошибка запуска / Launch failed: {e:#}"));
+                    mail.lock().unwrap().toast = Some("Ошибка запуска / Launch failed".into());
                 }
-
-                let state2 = state.clone();
-                let _ = weak.upgrade_in_event_loop(move |ui| {
-                    set_busy(&ui, false, "", 0.0);
-                    refresh_instances(&ui, &state2);
-                });
+                state.lock().unwrap().busy = false;
+                set_status(&mail, false, "", 0.0);
+                mail.lock().unwrap().refresh_instances = true;
             });
         });
     }
 
-    // -------------------------------------------------------- ely login
+    // --------------------------------------------------------- ely login
     {
-        let weak = ui.as_weak();
         let state = state.clone();
+        let mail = mail.clone();
         ui.on_login_ely(move |login, password, totp| {
             let (login, password, totp) = (login.to_string(), password.to_string(), totp.to_string());
-            let weak = weak.clone();
             let state = state.clone();
+            let mail = mail.clone();
 
-            if let Some(ui) = weak.upgrade() {
-                ui.set_login_busy(true);
-                ui.set_login_error(SharedString::new());
-            }
+            mail.lock().unwrap().login = Some(LoginUpdate {
+                busy: true,
+                needs_totp: !totp.is_empty(),
+                error: String::new(),
+                close: false,
+            });
 
             std::thread::spawn(move || {
                 let client_token = uuid::Uuid::new_v4().to_string();
                 match ely::login(&login, &password, &totp, &client_token) {
                     Ok(outcome) if outcome.needs_totp => {
-                        let _ = weak.upgrade_in_event_loop(|ui| {
-                            ui.set_login_busy(false);
-                            ui.set_login_needs_totp(true);
-                            ui.set_login_error(
-                                "Введите код двухфакторной аутентификации / Enter your 2FA code".into(),
-                            );
+                        mail.lock().unwrap().login = Some(LoginUpdate {
+                            busy: false,
+                            needs_totp: true,
+                            error: "Введите код двухфакторной аутентификации / Enter your 2FA code".into(),
+                            close: false,
                         });
                     }
                     Ok(outcome) => {
@@ -534,25 +618,27 @@ fn install_callbacks(ui: &AppWindow, state: &Shared) {
                         }
                         save_store(&state);
 
-                        let state2 = state.clone();
-                        let _ = weak.upgrade_in_event_loop(move |ui| {
-                            ui.set_login_busy(false);
-                            ui.set_login_needs_totp(false);
-                            ui.set_login_error(SharedString::new());
-                            ui.set_show_login(false);
-                            refresh_accounts(&ui, &state2);
-                            load_heads(&ui, &state2);
-                            log_line(&ui, "ok", &format!("Вход выполнен: {username} (Ely.by)"));
+                        let mut out = mail.lock().unwrap();
+                        out.login = Some(LoginUpdate {
+                            busy: false,
+                            needs_totp: false,
+                            error: String::new(),
+                            close: true,
                         });
-                        toast(&weak, format!("Привет, {username}!"));
+                        out.refresh_accounts = true;
+                        out.toast = Some(format!("Привет, {username}!"));
+                        out.logs.push(("ok".into(), format!("Вход выполнен: {username} (Ely.by)")));
                     }
                     Err(e) => {
                         let msg = format!("{e:#}");
-                        let _ = weak.upgrade_in_event_loop(move |ui| {
-                            ui.set_login_busy(false);
-                            ui.set_login_error(msg.clone().into());
-                            log_line(&ui, "error", &format!("Ошибка входа: {msg}"));
+                        let mut out = mail.lock().unwrap();
+                        out.login = Some(LoginUpdate {
+                            busy: false,
+                            needs_totp: msg.contains("2FA") || msg.contains("two factor"),
+                            error: msg.clone(),
+                            close: false,
                         });
+                        out.logs.push(("error".into(), format!("Ошибка входа: {msg}")));
                     }
                 }
             });
@@ -561,18 +647,17 @@ fn install_callbacks(ui: &AppWindow, state: &Shared) {
 
     // ----------------------------------------------------- offline login
     {
-        let weak = ui.as_weak();
         let state = state.clone();
+        let mail = mail.clone();
         ui.on_login_offline(move |name| {
             let name = name.trim().to_string();
             if name.is_empty() {
                 return;
             }
-            let uuid = ely::offline_uuid(&name);
             let account = Account {
                 id: format!("offline:{name}"),
                 username: name.clone(),
-                uuid,
+                uuid: ely::offline_uuid(&name),
                 kind: "offline".into(),
                 access_token: String::new(),
                 client_token: String::new(),
@@ -585,50 +670,50 @@ fn install_callbacks(ui: &AppWindow, state: &Shared) {
                 guard.store.accounts.push(account);
             }
             save_store(&state);
-            if let Some(ui) = weak.upgrade() {
-                ui.set_show_login(false);
-                refresh_accounts(&ui, &state);
-                log_line(&ui, "ok", &format!("Добавлен оффлайн-аккаунт: {name}"));
-            }
+
+            let mut out = mail.lock().unwrap();
+            out.refresh_accounts = true;
+            out.login = Some(LoginUpdate {
+                busy: false,
+                needs_totp: false,
+                error: String::new(),
+                close: true,
+            });
+            out.logs.push(("ok".into(), format!("Добавлен оффлайн-аккаунт: {name}")));
         });
     }
 
     // ------------------------------------------------------- account ops
     {
-        let weak = ui.as_weak();
         let state = state.clone();
+        let mail = mail.clone();
         ui.on_set_active_account(move |id| {
             state.lock().unwrap().store.active_account = id.to_string();
             save_store(&state);
-            if let Some(ui) = weak.upgrade() {
-                refresh_accounts(&ui, &state);
-            }
+            mail.lock().unwrap().refresh_accounts = true;
         });
     }
     {
-        let weak = ui.as_weak();
         let state = state.clone();
+        let mail = mail.clone();
         ui.on_remove_account(move |id| {
             let id = id.to_string();
             {
                 let mut guard = state.lock().unwrap();
                 if let Some(account) = guard.store.accounts.iter().find(|a| a.id == id).cloned() {
                     if account.is_ely() && !account.access_token.is_empty() {
-                        let (token, client) = (account.access_token.clone(), account.client_token.clone());
+                        let (token, client) = (account.access_token, account.client_token);
                         std::thread::spawn(move || ely::invalidate(&token, &client));
                     }
                 }
                 guard.store.accounts.retain(|a| a.id != id);
-                guard.heads.remove(&id);
                 if guard.store.active_account == id {
                     guard.store.active_account =
                         guard.store.accounts.first().map(|a| a.id.clone()).unwrap_or_default();
                 }
             }
             save_store(&state);
-            if let Some(ui) = weak.upgrade() {
-                refresh_accounts(&ui, &state);
-            }
+            mail.lock().unwrap().refresh_accounts = true;
         });
     }
 
@@ -636,8 +721,10 @@ fn install_callbacks(ui: &AppWindow, state: &Shared) {
     {
         let weak = ui.as_weak();
         let state = state.clone();
+        let mail = mail.clone();
         ui.on_save_settings(move || {
             let Some(ui) = weak.upgrade() else { return };
+            let russian = ui.global::<Tr>().get_ru();
             {
                 let mut guard = state.lock().unwrap();
                 guard.store.settings = Settings {
@@ -649,44 +736,32 @@ fn install_callbacks(ui: &AppWindow, state: &Shared) {
                     fullscreen: ui.get_fullscreen(),
                     hide_launcher: ui.get_hide_launcher(),
                     auto_java: ui.get_auto_java(),
-                    russian: ui.global::<Tr>().get_ru(),
+                    russian,
                     light_theme: ui.global::<Theme>().get_light(),
                 };
             }
             save_store(&state);
-            ui.set_toast(if ui.global::<Tr>().get_ru() { "Настройки сохранены".into() } else { SharedString::from("Settings saved") });
-            let weak2 = ui.as_weak();
-            slint::Timer::single_shot(std::time::Duration::from_secs(2), move || {
-                if let Some(ui) = weak2.upgrade() {
-                    ui.set_toast(SharedString::new());
-                }
-            });
+            mail.lock().unwrap().toast = Some(
+                if russian { "Настройки сохранены" } else { "Settings saved" }.to_string(),
+            );
         });
     }
 
     {
-        let weak = ui.as_weak();
         let state = state.clone();
+        let mail = mail.clone();
         ui.on_detect_java(move || {
-            let weak = weak.clone();
             let state = state.clone();
+            let mail = mail.clone();
             std::thread::spawn(move || {
                 let configured = state.lock().unwrap().store.settings.java_path.clone();
-                let found = launch::detect_java(&configured);
-                let (path, text) = match &found {
-                    Some(p) => (
-                        p.display().to_string(),
-                        format!("{} — {}", p.display(), launch::java_version_string(p)),
-                    ),
-                    None => (String::new(), "Java не найдена / Java not found".to_string()),
+                let text = match launch::detect_java(&configured) {
+                    Some(p) => format!("{} — {}", p.display(), launch::java_version_string(&p)),
+                    None => "Java не найдена / Java not found".to_string(),
                 };
-                let _ = weak.upgrade_in_event_loop(move |ui| {
-                    ui.set_detected_java(text.clone().into());
-                    if !path.is_empty() && ui.get_java_path().is_empty() {
-                        ui.set_java_path(path.into());
-                    }
-                    log_line(&ui, "info", &format!("Java: {text}"));
-                });
+                let mut out = mail.lock().unwrap();
+                out.java = Some(text.clone());
+                out.logs.push(("info".into(), format!("Java: {text}")));
             });
         });
     }
@@ -694,7 +769,7 @@ fn install_callbacks(ui: &AppWindow, state: &Shared) {
     {
         let state = state.clone();
         ui.on_open_data_dir(move || {
-            let dir = state.lock().unwrap().paths.root.clone();
+            let dir = state.lock().unwrap().root.clone();
             let _ = std::fs::create_dir_all(&dir);
             util::open_path(&dir.display().to_string());
         });
@@ -713,19 +788,21 @@ fn install_callbacks(ui: &AppWindow, state: &Shared) {
     }
     {
         let weak = ui.as_weak();
+        let mail = mail.clone();
         ui.on_copy_log(move || {
             let Some(ui) = weak.upgrade() else { return };
-            let model = ui.get_log_lines();
-            let text = model
+            let text = ui
+                .get_log_lines()
                 .iter()
                 .map(|l| l.text.to_string())
                 .collect::<Vec<_>>()
                 .join("\n");
             let path = util::data_dir().join("latest-log.txt");
-            match std::fs::write(&path, text) {
-                Ok(()) => log_line(&ui, "ok", &format!("Журнал сохранён: {}", path.display())),
-                Err(e) => log_line(&ui, "error", &format!("Не удалось сохранить журнал: {e}")),
-            }
+            let entry = match std::fs::write(&path, text) {
+                Ok(()) => ("ok".to_string(), format!("Журнал сохранён: {}", path.display())),
+                Err(e) => ("error".to_string(), format!("Не удалось сохранить журнал: {e}")),
+            };
+            mail.lock().unwrap().logs.push(entry);
         });
     }
 
@@ -734,10 +811,10 @@ fn install_callbacks(ui: &AppWindow, state: &Shared) {
 
 // ------------------------------------------------------------ launch flow
 
-fn run_instance(weak: &Weak<AppWindow>, state: &Shared, id: &str) -> anyhow::Result<()> {
+fn run_instance(state: &Shared, mail: &Mail, id: &str) -> anyhow::Result<()> {
     use anyhow::{anyhow, Context};
 
-    let (instance, account, settings, root) = {
+    let (instance, mut account, settings, root) = {
         let guard = state.lock().unwrap();
         let instance = guard
             .store
@@ -749,44 +826,39 @@ fn run_instance(weak: &Weak<AppWindow>, state: &Shared, id: &str) -> anyhow::Res
             .active()
             .cloned()
             .ok_or_else(|| anyhow!("no active account"))?;
-        (instance, account, guard.store.settings.clone(), guard.paths.root.clone())
+        (instance, account, guard.store.settings.clone(), guard.root.clone())
     };
 
     let paths = Paths::new(root);
-    log_from_thread(weak, "info", format!("Запуск «{}» ({})", instance.name, instance.version));
+    push_log(mail, "info", format!("Запуск «{}» ({})", instance.name, instance.version));
 
     // -- version metadata
-    let detail = {
-        let weak2 = weak.clone();
-        let _ = weak.upgrade_in_event_loop(|ui| set_busy(&ui, true, "Метаданные версии / Version metadata", 0.01));
-        let _ = &weak2;
-        install::load_version(&paths, None, &instance.version)
-            .with_context(|| format!("loading version {}", instance.version))?
-    };
+    set_status(mail, true, "Метаданные версии / Version metadata", 0.01);
+    let detail = install::load_version(&paths, None, &instance.version)
+        .with_context(|| format!("loading version {}", instance.version))?;
 
     // -- downloads
     let reporter: Reporter = {
-        let weak = weak.clone();
+        let mail = mail.clone();
         Arc::new(move |text: &str, progress: f32| {
-            let text = text.to_string();
-            let _ = weak.upgrade_in_event_loop(move |ui| set_busy(&ui, true, &text, progress));
+            mail.lock().unwrap().status = Some((true, text.to_string(), progress));
         })
     };
     install::install_version(&paths, &detail, &reporter).context("installing version files")?;
 
     // -- authlib-injector for Ely.by accounts
     let injector = if account.is_ely() {
-        log_from_thread(weak, "info", "Загрузка authlib-injector...".into());
+        set_status(mail, true, "authlib-injector...", 0.98);
+        push_log(mail, "info", "Загрузка authlib-injector / Fetching authlib-injector");
         Some(ely::ensure_authlib_injector(&paths.root).context("downloading authlib-injector")?)
     } else {
         None
     };
 
-    // -- refresh the Ely.by token if it went stale
-    let mut account = account;
+    // -- refresh a stale Ely.by token
     if account.is_ely() && !account.access_token.is_empty() {
         if !ely::validate(&account.access_token, &account.client_token) {
-            log_from_thread(weak, "warn", "Токен устарел, обновляем... / Refreshing token...".into());
+            push_log(mail, "warn", "Токен устарел, обновляем / Refreshing token...");
             match ely::refresh(&account.access_token, &account.client_token) {
                 Ok(token) => {
                     account.access_token = token.clone();
@@ -797,12 +869,12 @@ fn run_instance(weak: &Weak<AppWindow>, state: &Shared, id: &str) -> anyhow::Res
                     let _ = guard.store.save();
                 }
                 Err(e) => {
-                    log_from_thread(
-                        weak,
+                    push_log(
+                        mail,
                         "error",
-                        format!("Не удалось обновить токен, войдите заново / Re-login required: {e:#}"),
+                        format!("Сессия истекла, войдите заново / Session expired, sign in again: {e:#}"),
                     );
-                    let _ = weak.upgrade_in_event_loop(|ui| ui.invoke_open_login());
+                    mail.lock().unwrap().open_login = true;
                     return Err(anyhow!("Ely.by session expired"));
                 }
             }
@@ -816,24 +888,25 @@ fn run_instance(weak: &Weak<AppWindow>, state: &Shared, id: &str) -> anyhow::Res
     let spec = launch::LaunchSpec {
         paths: &paths,
         detail: &detail,
-        instance_dir: instance_dir.clone(),
+        instance_dir,
         account: &account,
         settings: &settings,
         authlib_injector: injector,
     };
     let cmd = launch::build_command(&spec)?;
 
-    log_from_thread(weak, "info", format!("Java: {}", cmd.program.display()));
-    log_from_thread(weak, "info", format!("Аргументы / Args: {} шт.", cmd.args.len()));
+    push_log(mail, "info", format!("Java: {}", cmd.program.display()));
+    push_log(mail, "info", format!("Аргументов / Args: {}", cmd.args.len()));
     if account.is_ely() {
-        log_from_thread(weak, "ok", "authlib-injector: ely.by".into());
+        push_log(mail, "ok", "authlib-injector: ely.by");
     }
 
     // -- go
     let child = {
-        let weak = weak.clone();
+        let mail = mail.clone();
         launch::spawn(cmd, move |line, is_err| {
-            log_from_thread(&weak, if is_err { "error" } else { "game" }, line);
+            let level = if is_err { "error" } else { "game" };
+            mail.lock().unwrap().logs.push((level.to_string(), line));
         })?
     };
     let pid = child.id();
@@ -847,37 +920,38 @@ fn run_instance(weak: &Weak<AppWindow>, state: &Shared, id: &str) -> anyhow::Res
         let _ = guard.store.save();
     }
 
-    let state2 = state.clone();
-    let _ = weak.upgrade_in_event_loop(move |ui| {
-        set_busy(&ui, false, "", 0.0);
-        refresh_instances(&ui, &state2);
-        if ui.get_hide_launcher() {
-            let _ = ui.window().set_minimized(true);
+    {
+        let mut out = mail.lock().unwrap();
+        out.status = Some((false, String::new(), 0.0));
+        out.refresh_instances = true;
+        if settings.hide_launcher {
+            out.minimize = Some(true);
         }
-    });
-    log_from_thread(weak, "ok", format!("Игра запущена (pid {pid})"));
+        out.logs.push(("ok".into(), format!("Игра запущена / Game started (pid {pid})")));
+    }
 
-    // -- wait for the game in a detached thread so the UI stays responsive
-    let weak2 = weak.clone();
-    let state3 = state.clone();
+    // -- reap the process without blocking the launcher
+    let mail2 = mail.clone();
+    let state2 = state.clone();
     let instance_id = instance.id.clone();
     std::thread::spawn(move || {
         let mut child = child;
         let status = child.wait();
-        state3.lock().unwrap().running.remove(&instance_id);
+        state2.lock().unwrap().running.remove(&instance_id);
 
-        let text = match status {
-            Ok(s) if s.success() => "Игра закрыта / Game exited normally".to_string(),
-            Ok(s) => format!("Игра завершилась с кодом / Game exited with code {:?}", s.code()),
-            Err(e) => format!("Ошибка ожидания процесса: {e}"),
+        let (level, text) = match status {
+            Ok(s) if s.success() => ("ok", "Игра закрыта / Game exited normally".to_string()),
+            Ok(s) => (
+                "warn",
+                format!("Игра завершилась с кодом / Game exited with code {:?}", s.code()),
+            ),
+            Err(e) => ("error", format!("Ошибка ожидания процесса: {e}")),
         };
-        let ok = matches!(status, Ok(s) if s.success());
 
-        let _ = weak2.upgrade_in_event_loop(move |ui| {
-            log_line(&ui, if ok { "ok" } else { "warn" }, &text);
-            refresh_instances(&ui, &state3);
-            let _ = ui.window().set_minimized(false);
-        });
+        let mut out = mail2.lock().unwrap();
+        out.logs.push((level.to_string(), text));
+        out.refresh_instances = true;
+        out.minimize = Some(false);
     });
 
     Ok(())

@@ -83,6 +83,7 @@ export component AppWindow inherits Window {
     in property <bool> busy: false;
     in property <string> active-account: "";
     in property <bool> active-is-ely: false;
+    in property <string> active-initial: "?";
     in property <image> active-head;
     in property <bool> active-has-head: false;
     in property <bool> versions-loading: false;
@@ -261,7 +262,7 @@ export component AppWindow inherits Window {
                         Avatar {
                             head: root.active-head;
                             has-head: root.active-has-head;
-                            initial: root.active-account == "" ? "?" : root.active-account;
+                            initial: root.active-initial;
                             size: 34px;
                             y: (parent.height - 34px) / 2;
                         }

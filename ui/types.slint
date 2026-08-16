@@ -17,6 +17,7 @@ export struct AccountItem {
     username: string,
     uuid: string,
     kind: string,          // "ely" | "offline"
+    initial: string,       // first letter, shown when no skin is available
     active: bool,
     head: image,           // rendered 8x8 skin head, upscaled
     has-head: bool,

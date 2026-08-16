@@ -54,15 +54,17 @@ export component LogPage inherits Rectangle {
             background: Theme.bg-alt;
 
             sv := ScrollView {
-                viewport-y: root.autoscroll
-                    ? min(0px, self.visible-height - self.viewport-height)
-                    : self.viewport-y;
 
                 VerticalLayout {
                     padding: 10px;
                     spacing: 1px;
 
-                    for l in root.lines: Text {
+                    for l[i] in root.lines: Text {
+                        init => {
+                            if (root.autoscroll && i == root.lines.length - 1) {
+                                sv.viewport-y = min(0px, sv.visible-height - sv.viewport-height);
+                            }
+                        }
                         text: l.text;
                         font-family: "monospace";
                         font-size: Theme.fs-sm;
