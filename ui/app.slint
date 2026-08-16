@@ -1,0 +1,479 @@
+import { Theme } from "theme.slint";
+import { Tr } from "strings.slint";
+import { InstanceItem, AccountItem, VersionItem, LogLine } from "types.slint";
+import { Btn, IconBtn, Card, Progress, Avatar, Badge, Separator } from "widgets.slint";
+import { InstancesPage } from "pages/instances.slint";
+import { AccountsPage } from "pages/accounts.slint";
+import { SettingsPage } from "pages/settings.slint";
+import { LogPage } from "pages/log.slint";
+import { AboutPage } from "pages/about.slint";
+import { LoginDialog, NewInstanceDialog, ConfirmDialog } from "dialogs.slint";
+
+export { Theme, Tr }
+
+component NavItem inherits Rectangle {
+    in property <string> glyph;
+    in property <string> text;
+    in property <bool> selected;
+    callback clicked();
+
+    height: 38px;
+    border-radius: Theme.radius-sm;
+    background: root.selected ? Theme.accent.with-alpha(0.20)
+        : (touch.has-hover ? Theme.panel-hover : transparent);
+    animate background { duration: 110ms; }
+
+    Rectangle {
+        x: 0;
+        width: 3px;
+        height: root.selected ? 20px : 0px;
+        y: (parent.height - self.height) / 2;
+        border-radius: 2px;
+        background: Theme.accent;
+        animate height { duration: 130ms; easing: ease-out; }
+    }
+
+    HorizontalLayout {
+        padding-left: 12px;
+        padding-right: 10px;
+        spacing: 10px;
+
+        Text {
+            text: root.glyph;
+            font-size: 15px;
+            vertical-alignment: center;
+        }
+
+        Text {
+            text: root.text;
+            color: root.selected ? Theme.text : Theme.text-dim;
+            font-size: Theme.fs;
+            font-weight: root.selected ? 700 : 500;
+            vertical-alignment: center;
+            horizontal-stretch: 1;
+            overflow: elide;
+        }
+    }
+
+    touch := TouchArea {
+        mouse-cursor: MouseCursor.pointer;
+        clicked => { root.clicked(); }
+    }
+}
+
+export component AppWindow inherits Window {
+    title: "SlintLauncher";
+    min-width: 940px;
+    min-height: 620px;
+    preferred-width: 1080px;
+    preferred-height: 700px;
+    background: Theme.bg;
+    icon: @image-url("icon.png");
+
+    // ---------------------------------------------------------- state in
+    in property <[InstanceItem]> instances;
+    in property <[AccountItem]> accounts;
+    in property <[VersionItem]> versions;
+    in property <[LogLine]> log-lines;
+    in property <string> app-version: "0.1.0";
+    in property <string> data-dir;
+    in property <string> detected-java;
+    in property <string> status-text: "";
+    in property <float> progress: 0.0;
+    in property <bool> busy: false;
+    in property <string> active-account: "";
+    in property <bool> active-is-ely: false;
+    in property <image> active-head;
+    in property <bool> active-has-head: false;
+    in property <bool> versions-loading: false;
+    in property <string> versions-error: "";
+    in property <bool> login-busy: false;
+    in property <bool> login-needs-totp: false;
+    in property <string> login-error: "";
+    in property <string> toast: "";
+
+    // ---------------------------------------------------------- settings
+    in-out property <string> java-path;
+    in-out property <int> max-memory: 4096;
+    in-out property <string> jvm-args;
+    in-out property <int> win-width: 854;
+    in-out property <int> win-height: 480;
+    in-out property <bool> fullscreen: false;
+    in-out property <bool> hide-launcher: true;
+    in-out property <bool> auto-java: true;
+
+    // ---------------------------------------------------------- ui state
+    in-out property <int> page: 0;
+    in-out property <string> selected-instance;
+    in-out property <bool> show-login: false;
+    in-out property <bool> show-new-instance: false;
+    in-out property <bool> show-confirm: false;
+    in-out property <string> confirm-target: "";
+    in-out property <string> new-instance-name: "";
+    in-out property <string> new-instance-version: "";
+
+    // ---------------------------------------------------------- callbacks
+    callback play(string);
+    callback open-instance-folder(string);
+    callback delete-instance(string);
+    callback create-instance(string, string);
+    callback refresh-versions(bool, bool);
+    callback login-ely(string, string, string);
+    callback login-offline(string);
+    callback set-active-account(string);
+    callback remove-account(string);
+    callback save-settings();
+    callback detect-java();
+    callback open-data-dir();
+    callback open-url(string);
+    callback clear-log();
+    callback copy-log();
+    callback cancel-task();
+
+    public function open-login() {
+        root.show-login = true;
+    }
+
+    HorizontalLayout {
+        spacing: 0;
+
+        // -------------------------------------------------------- sidebar
+        Rectangle {
+            width: 210px;
+            background: Theme.sidebar;
+
+            Rectangle {
+                x: parent.width - 1px;
+                width: 1px;
+                background: Theme.border;
+            }
+
+            VerticalLayout {
+                padding: 12px;
+                spacing: 4px;
+
+                HorizontalLayout {
+                    spacing: 10px;
+                    padding-bottom: 6px;
+
+                    Rectangle {
+                        width: 34px;
+                        height: 34px;
+                        border-radius: Theme.radius-sm;
+                        background: @linear-gradient(135deg, Theme.accent 0%, Theme.ely 100%);
+
+                        Text {
+                            text: "SL";
+                            color: #ffffff;
+                            font-size: 14px;
+                            font-weight: 800;
+                            width: 100%;
+                            height: 100%;
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
+                        }
+                    }
+
+                    VerticalLayout {
+                        alignment: center;
+                        spacing: 0px;
+
+                        Text {
+                            text: Tr.app-name;
+                            color: Theme.text;
+                            font-size: Theme.fs;
+                            font-weight: 700;
+                        }
+
+                        Text {
+                            text: "v\{root.app-version}";
+                            color: Theme.text-faint;
+                            font-size: Theme.fs-xs;
+                        }
+                    }
+                }
+
+                Separator { }
+
+                Rectangle { height: 4px; }
+
+                NavItem {
+                    glyph: "🧱";
+                    text: Tr.nav-instances;
+                    selected: root.page == 0;
+                    clicked => { root.page = 0; }
+                }
+
+                NavItem {
+                    glyph: "👤";
+                    text: Tr.nav-accounts;
+                    selected: root.page == 1;
+                    clicked => { root.page = 1; }
+                }
+
+                NavItem {
+                    glyph: "📜";
+                    text: Tr.nav-log;
+                    selected: root.page == 2;
+                    clicked => { root.page = 2; }
+                }
+
+                NavItem {
+                    glyph: "⚙";
+                    text: Tr.nav-settings;
+                    selected: root.page == 3;
+                    clicked => { root.page = 3; }
+                }
+
+                NavItem {
+                    glyph: "ℹ";
+                    text: Tr.nav-about;
+                    selected: root.page == 4;
+                    clicked => { root.page = 4; }
+                }
+
+                Rectangle { vertical-stretch: 1; }
+
+                // active account card
+                Rectangle {
+                    height: 60px;
+                    border-radius: Theme.radius;
+                    background: Theme.panel;
+                    border-width: 1px;
+                    border-color: acct.has-hover ? Theme.accent : Theme.border;
+                    animate border-color { duration: 110ms; }
+
+                    acct := TouchArea {
+                        mouse-cursor: MouseCursor.pointer;
+                        clicked => {
+                            if (root.active-account == "") {
+                                root.show-login = true;
+                            } else {
+                                root.page = 1;
+                            }
+                        }
+                    }
+
+                    HorizontalLayout {
+                        padding: 11px;
+                        spacing: 10px;
+
+                        Avatar {
+                            head: root.active-head;
+                            has-head: root.active-has-head;
+                            initial: root.active-account == "" ? "?" : root.active-account;
+                            size: 34px;
+                            y: (parent.height - 34px) / 2;
+                        }
+
+                        VerticalLayout {
+                            alignment: center;
+                            spacing: 2px;
+                            horizontal-stretch: 1;
+
+                            Text {
+                                text: root.active-account == ""
+                                    ? (Tr.ru ? "Не выполнен вход" : "Not signed in")
+                                    : root.active-account;
+                                color: Theme.text;
+                                font-size: Theme.fs-sm;
+                                font-weight: 700;
+                                overflow: elide;
+                            }
+
+                            Text {
+                                text: root.active-account == ""
+                                    ? Tr.sign-in
+                                    : (root.active-is-ely ? "Ely.by" : (Tr.ru ? "оффлайн" : "offline"));
+                                color: root.active-is-ely && root.active-account != ""
+                                    ? Theme.ely : Theme.text-faint;
+                                font-size: Theme.fs-xs;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // -------------------------------------------------------- content
+        VerticalLayout {
+            padding: 16px;
+            spacing: 12px;
+
+            Rectangle {
+                vertical-stretch: 1;
+
+                if root.page == 0: InstancesPage {
+                    width: 100%;
+                    height: 100%;
+                    instances: root.instances;
+                    selected-id <=> root.selected-instance;
+                    busy: root.busy;
+                    play(id) => { root.play(id); }
+                    open-folder(id) => { root.open-instance-folder(id); }
+                    remove(id) => {
+                        root.confirm-target = id;
+                        root.show-confirm = true;
+                    }
+                    new-instance => {
+                        root.new-instance-name = "";
+                        root.show-new-instance = true;
+                        root.refresh-versions(false, false);
+                    }
+                }
+
+                if root.page == 1: AccountsPage {
+                    width: 100%;
+                    height: 100%;
+                    accounts: root.accounts;
+                    activate(id) => { root.set-active-account(id); }
+                    remove(id) => { root.remove-account(id); }
+                    add-account => { root.show-login = true; }
+                    open-url(u) => { root.open-url(u); }
+                }
+
+                if root.page == 2: LogPage {
+                    width: 100%;
+                    height: 100%;
+                    lines: root.log-lines;
+                    clear-log => { root.clear-log(); }
+                    copy-log => { root.copy-log(); }
+                }
+
+                if root.page == 3: SettingsPage {
+                    width: 100%;
+                    height: 100%;
+                    java-path <=> root.java-path;
+                    max-memory <=> root.max-memory;
+                    jvm-args <=> root.jvm-args;
+                    win-width <=> root.win-width;
+                    win-height <=> root.win-height;
+                    fullscreen <=> root.fullscreen;
+                    hide-launcher <=> root.hide-launcher;
+                    auto-java <=> root.auto-java;
+                    data-dir: root.data-dir;
+                    detected-java: root.detected-java;
+                    save => { root.save-settings(); }
+                    detect-java => { root.detect-java(); }
+                    open-data-dir => { root.open-data-dir(); }
+                    toggle-lang => { Tr.ru = !Tr.ru; root.save-settings(); }
+                    toggle-theme => { Theme.light = !Theme.light; root.save-settings(); }
+                }
+
+                if root.page == 4: AboutPage {
+                    width: 100%;
+                    height: 100%;
+                    version: root.app-version;
+                    open-url(u) => { root.open-url(u); }
+                }
+            }
+
+            // status bar
+            Rectangle {
+                height: 44px;
+                border-radius: Theme.radius;
+                background: Theme.panel;
+                border-width: 1px;
+                border-color: Theme.border;
+
+                HorizontalLayout {
+                    padding-left: 12px;
+                    padding-right: 12px;
+                    spacing: 12px;
+
+                    VerticalLayout {
+                        alignment: center;
+                        spacing: 4px;
+                        horizontal-stretch: 1;
+
+                        Text {
+                            text: root.status-text == "" ? Tr.ready : root.status-text;
+                            color: root.busy ? Theme.text : Theme.text-dim;
+                            font-size: Theme.fs-sm;
+                            overflow: elide;
+                        }
+
+                        if root.busy: Progress {
+                            value: root.progress;
+                        }
+                    }
+
+                    if root.busy: Text {
+                        text: "\{round(root.progress * 100)}%";
+                        color: Theme.accent;
+                        font-size: Theme.fs-sm;
+                        font-weight: 700;
+                        vertical-alignment: center;
+                    }
+                }
+            }
+        }
+    }
+
+    // ------------------------------------------------------------ overlays
+    if root.show-login: LoginDialog {
+        width: 100%;
+        height: 100%;
+        busy: root.login-busy;
+        needs-totp: root.login-needs-totp;
+        error: root.login-error;
+        close => {
+            if (!root.login-busy) { root.show-login = false; }
+        }
+        submit => { root.login-ely(self.login, self.password, self.totp); }
+        submit-offline => {
+            root.login-offline(self.offline-name);
+        }
+        open-url(u) => { root.open-url(u); }
+    }
+
+    if root.show-new-instance: NewInstanceDialog {
+        width: 100%;
+        height: 100%;
+        versions: root.versions;
+        name <=> root.new-instance-name;
+        selected-version <=> root.new-instance-version;
+        loading: root.versions-loading;
+        error: root.versions-error;
+        close => { root.show-new-instance = false; }
+        filters-changed => { root.refresh-versions(self.show-snapshots, self.show-old); }
+        create => {
+            root.create-instance(root.new-instance-name, root.new-instance-version);
+            root.show-new-instance = false;
+        }
+    }
+
+    if root.show-confirm: ConfirmDialog {
+        width: 100%;
+        height: 100%;
+        message: Tr.confirm-delete;
+        ok-text: Tr.yes-delete;
+        close => { root.show-confirm = false; }
+        confirm => {
+            root.delete-instance(root.confirm-target);
+            root.show-confirm = false;
+        }
+    }
+
+    // toast
+    if root.toast != "": Rectangle {
+        x: (parent.width - self.width) / 2;
+        y: parent.height - 80px;
+        width: tt.preferred-width + 32px;
+        height: 38px;
+        border-radius: 19px;
+        background: Theme.panel;
+        border-width: 1px;
+        border-color: Theme.accent;
+
+        tt := Text {
+            text: root.toast;
+            color: Theme.text;
+            font-size: Theme.fs-sm;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+            width: 100%;
+            height: 100%;
+        }
+    }
+}

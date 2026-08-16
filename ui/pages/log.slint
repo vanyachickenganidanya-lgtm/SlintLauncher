@@ -1,0 +1,80 @@
+import { ScrollView } from "std-widgets.slint";
+import { Theme } from "../theme.slint";
+import { Tr } from "../strings.slint";
+import { LogLine } from "../types.slint";
+import { Btn, Card, Toggle } from "../widgets.slint";
+
+export component LogPage inherits Rectangle {
+    in property <[LogLine]> lines;
+    in-out property <bool> autoscroll: true;
+    callback clear-log();
+    callback copy-log();
+
+    background: transparent;
+
+    VerticalLayout {
+        spacing: 12px;
+
+        HorizontalLayout {
+            spacing: 10px;
+
+            Text {
+                text: Tr.log-title;
+                color: Theme.text;
+                font-size: Theme.fs-title;
+                font-weight: 700;
+                horizontal-stretch: 1;
+                vertical-alignment: center;
+            }
+
+            Toggle {
+                text: Tr.autoscroll;
+                checked <=> root.autoscroll;
+                y: (parent.height - self.height) / 2;
+                horizontal-stretch: 0;
+            }
+
+            Btn {
+                text: Tr.copy-log;
+                flat: true;
+                y: (parent.height - self.height) / 2;
+                clicked => { root.copy-log(); }
+            }
+
+            Btn {
+                text: Tr.clear-log;
+                flat: true;
+                y: (parent.height - self.height) / 2;
+                clicked => { root.clear-log(); }
+            }
+        }
+
+        Card {
+            vertical-stretch: 1;
+            background: Theme.bg-alt;
+
+            sv := ScrollView {
+                viewport-y: root.autoscroll
+                    ? min(0px, self.visible-height - self.viewport-height)
+                    : self.viewport-y;
+
+                VerticalLayout {
+                    padding: 10px;
+                    spacing: 1px;
+
+                    for l in root.lines: Text {
+                        text: l.text;
+                        font-family: "monospace";
+                        font-size: Theme.fs-sm;
+                        wrap: word-wrap;
+                        color: l.level == "error" ? Theme.danger
+                            : l.level == "warn" ? Theme.warn
+                            : l.level == "ok" ? Theme.ok
+                            : l.level == "game" ? Theme.text-dim
+                            : Theme.text;
+                    }
+                }
+            }
+        }
+    }
+}

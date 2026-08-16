@@ -1,0 +1,294 @@
+import { ScrollView } from "std-widgets.slint";
+import { Theme } from "../theme.slint";
+import { Tr } from "../strings.slint";
+import { Btn, Card, Field, Toggle, Separator } from "../widgets.slint";
+
+component Section inherits Card {
+    in property <string> title;
+    in property <string> glyph;
+
+    VerticalLayout {
+        padding: 14px;
+        spacing: 10px;
+
+        HorizontalLayout {
+            spacing: 8px;
+
+            Text {
+                text: root.glyph;
+                font-size: Theme.fs-big;
+            }
+
+            Text {
+                text: root.title;
+                color: Theme.text;
+                font-size: Theme.fs-big;
+                font-weight: 700;
+            }
+        }
+
+        Separator { }
+
+        @children
+    }
+}
+
+export component SettingsPage inherits Rectangle {
+    in-out property <string> java-path;
+    in-out property <int> max-memory;
+    in-out property <string> jvm-args;
+    in-out property <int> win-width;
+    in-out property <int> win-height;
+    in-out property <bool> fullscreen;
+    in-out property <bool> hide-launcher;
+    in-out property <bool> auto-java;
+    in property <string> data-dir;
+    in property <string> detected-java;
+
+    callback save();
+    callback detect-java();
+    callback open-data-dir();
+    callback toggle-lang();
+    callback toggle-theme();
+
+    background: transparent;
+
+    VerticalLayout {
+        spacing: 12px;
+
+        Text {
+            text: Tr.settings-title;
+            color: Theme.text;
+            font-size: Theme.fs-title;
+            font-weight: 700;
+        }
+
+        ScrollView {
+            vertical-stretch: 1;
+
+            VerticalLayout {
+                spacing: 10px;
+                padding-right: 6px;
+
+                Section {
+                    title: Tr.java-section;
+                    glyph: "☕";
+
+                    HorizontalLayout {
+                        spacing: 8px;
+
+                        Field {
+                            label: Tr.java-path;
+                            placeholder: "/usr/bin/java";
+                            text <=> root.java-path;
+                            horizontal-stretch: 1;
+                        }
+
+                        Btn {
+                            text: Tr.java-detect;
+                            flat: true;
+                            y: 22px;
+                            clicked => { root.detect-java(); }
+                        }
+                    }
+
+                    Text {
+                        text: root.detected-java;
+                        color: Theme.text-faint;
+                        font-size: Theme.fs-xs;
+                        wrap: word-wrap;
+                    }
+
+                    Toggle {
+                        text: Tr.java-auto-dl;
+                        checked <=> root.auto-java;
+                    }
+                }
+
+                Section {
+                    title: Tr.memory-section;
+                    glyph: "🧠";
+
+                    HorizontalLayout {
+                        spacing: 10px;
+
+                        VerticalLayout {
+                            spacing: 4px;
+                            horizontal-stretch: 1;
+
+                            HorizontalLayout {
+                                Text {
+                                    text: Tr.max-memory;
+                                    color: Theme.text-dim;
+                                    font-size: Theme.fs-xs;
+                                    horizontal-stretch: 1;
+                                }
+
+                                Text {
+                                    text: "\{root.max-memory} MB";
+                                    color: Theme.accent;
+                                    font-size: Theme.fs-xs;
+                                    font-weight: 700;
+                                }
+                            }
+
+                            // hand-rolled slider (512..16384 MB, 256 MB steps)
+                            Rectangle {
+                                height: 22px;
+
+                                Rectangle {
+                                    height: 6px;
+                                    border-radius: 3px;
+                                    background: Theme.neutral;
+
+                                    Rectangle {
+                                        x: 0;
+                                        width: parent.width * clamp((root.max-memory - 512) / 15872.0, 0.0, 1.0);
+                                        height: parent.height;
+                                        border-radius: 3px;
+                                        background: Theme.accent;
+                                    }
+                                }
+
+                                Rectangle {
+                                    width: 14px;
+                                    height: 14px;
+                                    border-radius: 7px;
+                                    background: #ffffff;
+                                    border-width: 2px;
+                                    border-color: Theme.accent;
+                                    x: (parent.width - 14px) * clamp((root.max-memory - 512) / 15872.0, 0.0, 1.0);
+                                }
+
+                                ta := TouchArea {
+                                    mouse-cursor: MouseCursor.pointer;
+                                    moved => {
+                                        if (self.pressed) {
+                                            root.max-memory = round(clamp(self.mouse-x / parent.width, 0.0, 1.0)
+                                                * 15872 / 256) * 256 + 512;
+                                        }
+                                    }
+                                    clicked => {
+                                        root.max-memory = round(clamp(self.mouse-x / parent.width, 0.0, 1.0)
+                                            * 15872 / 256) * 256 + 512;
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    Field {
+                        label: Tr.jvm-args;
+                        placeholder: "-XX:+UseG1GC -Dfile.encoding=UTF-8";
+                        text <=> root.jvm-args;
+                    }
+                }
+
+                Section {
+                    title: Tr.window-section;
+                    glyph: "🖥";
+
+                    HorizontalLayout {
+                        spacing: 10px;
+
+                        w-field := Field {
+                            label: Tr.width;
+                            placeholder: "854";
+                            input-type: InputType.number;
+                            horizontal-stretch: 1;
+                            init => { self.text = "\{root.win-width}"; }
+                            edited => { root.win-width = round(self.text.to-float()); }
+                        }
+
+                        h-field := Field {
+                            label: Tr.height;
+                            placeholder: "480";
+                            input-type: InputType.number;
+                            horizontal-stretch: 1;
+                            init => { self.text = "\{root.win-height}"; }
+                            edited => { root.win-height = round(self.text.to-float()); }
+                        }
+                    }
+
+                    Toggle {
+                        text: Tr.fullscreen;
+                        checked <=> root.fullscreen;
+                    }
+                }
+
+                Section {
+                    title: Tr.launcher-section;
+                    glyph: "⚙";
+
+                    Toggle {
+                        text: Tr.close-on-launch;
+                        checked <=> root.hide-launcher;
+                    }
+
+                    Toggle {
+                        text: Tr.theme-light;
+                        checked: Theme.light;
+                        toggled => { root.toggle-theme(); }
+                    }
+
+                    HorizontalLayout {
+                        spacing: 8px;
+                        alignment: start;
+
+                        Text {
+                            text: Tr.language + ":";
+                            color: Theme.text;
+                            font-size: Theme.fs;
+                            vertical-alignment: center;
+                        }
+
+                        Btn {
+                            text: Tr.ru ? "Русский" : "English";
+                            flat: true;
+                            clicked => { root.toggle-lang(); }
+                        }
+                    }
+
+                    HorizontalLayout {
+                        spacing: 8px;
+
+                        VerticalLayout {
+                            spacing: 2px;
+                            horizontal-stretch: 1;
+                            alignment: center;
+
+                            Text {
+                                text: Tr.game-dir;
+                                color: Theme.text-dim;
+                                font-size: Theme.fs-xs;
+                            }
+
+                            Text {
+                                text: root.data-dir;
+                                color: Theme.text;
+                                font-size: Theme.fs-sm;
+                                overflow: elide;
+                            }
+                        }
+
+                        Btn {
+                            text: Tr.open;
+                            flat: true;
+                            y: (parent.height - self.height) / 2;
+                            clicked => { root.open-data-dir(); }
+                        }
+                    }
+                }
+            }
+        }
+
+        HorizontalLayout {
+            alignment: end;
+
+            Btn {
+                text: "💾 " + Tr.save;
+                clicked => { root.save(); }
+            }
+        }
+    }
+}

@@ -1,0 +1,36 @@
+// Colour palette and shared visual tokens for SlintLauncher.
+// Dark, PrismLauncher-flavoured, with an Ely.by-green accent for auth actions.
+
+export global Theme {
+    in-out property <bool> light: false;
+
+    out property <color> bg: light ? #f2f3f5 : #17181c;
+    out property <color> bg-alt: light ? #ffffff : #1e2026;
+    out property <color> panel: light ? #ffffff : #23252c;
+    out property <color> panel-hover: light ? #e9ebef : #2b2e37;
+    out property <color> sidebar: light ? #e7e9ee : #1b1d22;
+    out property <color> border: light ? #d6d9e0 : #32353f;
+    out property <color> overlay: light ? #00000055 : #000000aa;
+
+    out property <color> text: light ? #14161a : #eceef3;
+    out property <color> text-dim: light ? #5d636e : #9aa1ad;
+    out property <color> text-faint: light ? #878d99 : #6b7280;
+
+    out property <color> accent: #3d8bfd;
+    out property <color> ely: #2ea44f;
+    out property <color> danger: #e5534b;
+    out property <color> warn: #d9a441;
+    out property <color> ok: #3fb950;
+    out property <color> neutral: light ? #dfe2e8 : #343842;
+
+    out property <length> radius: 8px;
+    out property <length> radius-sm: 5px;
+    out property <length> pad: 14px;
+    out property <length> gap: 8px;
+
+    out property <length> fs-title: 20px;
+    out property <length> fs-big: 15px;
+    out property <length> fs: 13px;
+    out property <length> fs-sm: 12px;
+    out property <length> fs-xs: 11px;
+}

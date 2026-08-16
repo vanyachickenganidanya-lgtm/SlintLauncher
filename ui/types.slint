@@ -1,0 +1,34 @@
+// Data structures shared between Slint and Rust.
+
+export struct InstanceItem {
+    id: string,
+    name: string,
+    version: string,
+    kind: string,          // "release" | "snapshot" | "old"
+    installed: bool,
+    running: bool,
+    last-played: string,
+    hue: float,            // 0..360, used for the generated instance tile colour
+    icon-text: string,     // 1-2 letters drawn on the generated tile
+}
+
+export struct AccountItem {
+    id: string,
+    username: string,
+    uuid: string,
+    kind: string,          // "ely" | "offline"
+    active: bool,
+    head: image,           // rendered 8x8 skin head, upscaled
+    has-head: bool,
+}
+
+export struct VersionItem {
+    id: string,
+    kind: string,          // "release" | "snapshot" | "old_beta" | "old_alpha"
+    released: string,
+}
+
+export struct LogLine {
+    level: string,         // "info" | "warn" | "error" | "ok" | "game"
+    text: string,
+}

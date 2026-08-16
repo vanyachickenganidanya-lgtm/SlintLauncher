@@ -1,0 +1,101 @@
+// Tiny built-in i18n: every user visible string lives here.
+// `Tr.ru` is toggled from Rust / the settings page.
+
+export global Tr {
+    in-out property <bool> ru: true;
+
+    out property <string> app-name: "SlintLauncher";
+    out property <string> tagline: ru ? "Быстрый лаунчер Minecraft с Ely.by" : "Fast Minecraft launcher with Ely.by";
+
+    // navigation
+    out property <string> nav-instances: ru ? "Сборки" : "Instances";
+    out property <string> nav-accounts: ru ? "Аккаунты" : "Accounts";
+    out property <string> nav-settings: ru ? "Настройки" : "Settings";
+    out property <string> nav-log: ru ? "Журнал" : "Log";
+    out property <string> nav-about: ru ? "О программе" : "About";
+
+    // instances
+    out property <string> instances-title: ru ? "Мои сборки" : "My instances";
+    out property <string> add-instance: ru ? "Новая сборка" : "New instance";
+    out property <string> new-instance-title: ru ? "Создание сборки" : "Create instance";
+    out property <string> instance-name: ru ? "Название" : "Name";
+    out property <string> mc-version: ru ? "Версия Minecraft" : "Minecraft version";
+    out property <string> show-snapshots: ru ? "Показывать снапшоты" : "Show snapshots";
+    out property <string> show-old: ru ? "Показывать старые версии" : "Show old versions";
+    out property <string> create: ru ? "Создать" : "Create";
+    out property <string> cancel: ru ? "Отмена" : "Cancel";
+    out property <string> close: ru ? "Закрыть" : "Close";
+    out property <string> play: ru ? "Играть" : "Play";
+    out property <string> launching: ru ? "Запуск..." : "Launching...";
+    out property <string> kill: ru ? "Остановить" : "Kill";
+    out property <string> folder: ru ? "Папка" : "Folder";
+    out property <string> delete: ru ? "Удалить" : "Delete";
+    out property <string> no-instances: ru ? "Сборок пока нет. Создайте первую!" : "No instances yet. Create your first one!";
+    out property <string> never-played: ru ? "ещё не запускалась" : "never played";
+    out property <string> last-played: ru ? "запуск:" : "played:";
+    out property <string> installed: ru ? "установлена" : "installed";
+    out property <string> not-installed: ru ? "будет скачана" : "will be downloaded";
+    out property <string> running: ru ? "запущена" : "running";
+    out property <string> confirm-delete: ru ? "Удалить сборку вместе с файлами?" : "Delete the instance and all of its files?";
+    out property <string> yes-delete: ru ? "Да, удалить" : "Yes, delete";
+
+    // accounts / login
+    out property <string> accounts-title: ru ? "Аккаунты Ely.by" : "Ely.by accounts";
+    out property <string> add-account: ru ? "Добавить аккаунт" : "Add account";
+    out property <string> login-title: ru ? "Вход через Ely.by" : "Sign in with Ely.by";
+    out property <string> login-hint: ru ? "Введите e-mail или ник и пароль от аккаунта Ely.by." : "Enter your Ely.by e-mail (or nickname) and password.";
+    out property <string> login-field: ru ? "E-mail или ник" : "E-mail or nickname";
+    out property <string> password: ru ? "Пароль" : "Password";
+    out property <string> totp: ru ? "Код 2FA (если включён)" : "2FA code (if enabled)";
+    out property <string> sign-in: ru ? "Войти" : "Sign in";
+    out property <string> signing-in: ru ? "Входим..." : "Signing in...";
+    out property <string> offline-mode: ru ? "Оффлайн-аккаунт" : "Offline account";
+    out property <string> offline-hint: ru ? "Только для одиночной игры и оффлайн-серверов." : "Single player and offline-mode servers only.";
+    out property <string> nickname: ru ? "Ник" : "Nickname";
+    out property <string> add: ru ? "Добавить" : "Add";
+    out property <string> logout: ru ? "Выйти" : "Log out";
+    out property <string> active: ru ? "активный" : "active";
+    out property <string> make-active: ru ? "Сделать активным" : "Set active";
+    out property <string> no-accounts: ru ? "Нет аккаунтов. Войдите через Ely.by." : "No accounts. Sign in with Ely.by.";
+    out property <string> no-account-warn: ru ? "Сначала добавьте аккаунт" : "Add an account first";
+    out property <string> register-ely: ru ? "Регистрация на Ely.by" : "Create an Ely.by account";
+    out property <string> forgot-ely: ru ? "Забыли пароль?" : "Forgot password?";
+
+    // settings
+    out property <string> settings-title: ru ? "Настройки" : "Settings";
+    out property <string> java-section: ru ? "Java" : "Java";
+    out property <string> java-path: ru ? "Путь к Java (пусто = найти автоматически)" : "Java path (empty = autodetect)";
+    out property <string> java-detect: ru ? "Найти Java" : "Detect Java";
+    out property <string> java-auto-dl: ru ? "Скачивать Java автоматически, если не найдена" : "Download Java automatically when missing";
+    out property <string> memory-section: ru ? "Память" : "Memory";
+    out property <string> max-memory: ru ? "Максимум памяти (МБ)" : "Max memory (MB)";
+    out property <string> jvm-args: ru ? "Дополнительные аргументы JVM" : "Extra JVM arguments";
+    out property <string> window-section: ru ? "Окно игры" : "Game window";
+    out property <string> width: ru ? "Ширина" : "Width";
+    out property <string> height: ru ? "Высота" : "Height";
+    out property <string> fullscreen: ru ? "Полный экран" : "Fullscreen";
+    out property <string> launcher-section: ru ? "Лаунчер" : "Launcher";
+    out property <string> close-on-launch: ru ? "Сворачивать лаунчер при запуске игры" : "Hide launcher while the game runs";
+    out property <string> language: ru ? "Язык" : "Language";
+    out property <string> theme-light: ru ? "Светлая тема" : "Light theme";
+    out property <string> game-dir: ru ? "Папка лаунчера" : "Launcher directory";
+    out property <string> open: ru ? "Открыть" : "Open";
+    out property <string> save: ru ? "Сохранить" : "Save";
+    out property <string> saved: ru ? "Настройки сохранены" : "Settings saved";
+
+    // log
+    out property <string> log-title: ru ? "Журнал" : "Log";
+    out property <string> clear-log: ru ? "Очистить" : "Clear";
+    out property <string> copy-log: ru ? "Копировать" : "Copy";
+    out property <string> autoscroll: ru ? "Автопрокрутка" : "Auto-scroll";
+
+    // about
+    out property <string> about-text: ru
+        ? "Лаунчер Minecraft на Rust + Slint с авторизацией Ely.by через authlib-injector. Скачивает версии с официальных серверов Mojang, проверяет SHA-1 и запускает игру."
+        : "A Minecraft launcher written in Rust + Slint with Ely.by authentication via authlib-injector. Downloads versions from official Mojang servers, verifies SHA-1 and launches the game.";
+    out property <string> about-links: ru ? "Ссылки" : "Links";
+
+    // status
+    out property <string> ready: ru ? "Готово" : "Ready";
+    out property <string> idle: ru ? "Ожидание" : "Idle";
+}

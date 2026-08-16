@@ -1,0 +1,260 @@
+import { Theme } from "theme.slint";
+
+// ---------------------------------------------------------------- buttons
+
+export component Btn inherits Rectangle {
+    in property <string> text;
+    in property <color> tint: Theme.accent;
+    in property <bool> flat: false;
+    in property <bool> enabled: true;
+    in property <length> font-size: Theme.fs;
+    callback clicked();
+
+    height: 34px;
+    min-width: txt.preferred-width + 28px;
+    border-radius: Theme.radius-sm;
+    opacity: root.enabled ? 1.0 : 0.45;
+
+    background: root.flat
+        ? (touch.has-hover && root.enabled ? Theme.panel-hover : transparent)
+        : (touch.pressed && root.enabled ? root.tint.darker(0.25)
+            : (touch.has-hover && root.enabled ? root.tint.brighter(0.18) : root.tint));
+
+    border-width: root.flat ? 1px : 0px;
+    border-color: Theme.border;
+
+    animate background { duration: 110ms; }
+
+    txt := Text {
+        text: root.text;
+        color: root.flat ? Theme.text : #ffffff;
+        font-size: root.font-size;
+        font-weight: 600;
+        vertical-alignment: center;
+        horizontal-alignment: center;
+    }
+
+    touch := TouchArea {
+        mouse-cursor: root.enabled ? MouseCursor.pointer : MouseCursor.not-allowed;
+        clicked => {
+            if (root.enabled) { root.clicked(); }
+        }
+    }
+}
+
+export component IconBtn inherits Rectangle {
+    in property <string> glyph;
+    in property <string> tooltip;
+    in property <color> fg: Theme.text-dim;
+    callback clicked();
+
+    width: 30px;
+    height: 30px;
+    border-radius: Theme.radius-sm;
+    background: touch.has-hover ? Theme.panel-hover : transparent;
+
+    Text {
+        text: root.glyph;
+        color: touch.has-hover ? Theme.text : root.fg;
+        font-size: 15px;
+        vertical-alignment: center;
+        horizontal-alignment: center;
+    }
+
+    touch := TouchArea {
+        mouse-cursor: MouseCursor.pointer;
+        clicked => { root.clicked(); }
+    }
+}
+
+// ---------------------------------------------------------------- inputs
+
+export component Field inherits Rectangle {
+    in property <string> label;
+    in property <string> placeholder;
+    in property <bool> password: false;
+    in-out property <string> text;
+    in property <bool> enabled: true;
+    in property <InputType> input-type: root.password ? InputType.password : InputType.text;
+    callback accepted();
+    callback edited();
+
+    height: root.label == "" ? 36px : 58px;
+
+    VerticalLayout {
+        spacing: 4px;
+
+        if root.label != "": Text {
+            text: root.label;
+            color: Theme.text-dim;
+            font-size: Theme.fs-xs;
+        }
+
+        Rectangle {
+            height: 36px;
+            background: Theme.bg-alt;
+            border-radius: Theme.radius-sm;
+            border-width: 1px;
+            border-color: inp.has-focus ? Theme.accent : Theme.border;
+
+            HorizontalLayout {
+                padding-left: 10px;
+                padding-right: 10px;
+
+                inp := TextInput {
+                    text <=> root.text;
+                    color: Theme.text;
+                    font-size: Theme.fs;
+                    vertical-alignment: center;
+                    single-line: true;
+                    enabled: root.enabled;
+                    input-type: root.input-type;
+                    accepted => { root.accepted(); }
+                    edited => { root.edited(); }
+                }
+            }
+
+            if root.text == "" && !inp.has-focus: Text {
+                x: 10px;
+                text: root.placeholder;
+                color: Theme.text-faint;
+                font-size: Theme.fs;
+                vertical-alignment: center;
+                height: 100%;
+            }
+        }
+    }
+}
+
+export component Toggle inherits Rectangle {
+    in property <string> text;
+    in-out property <bool> checked;
+    callback toggled();
+
+    height: 24px;
+    horizontal-stretch: 1;
+
+    HorizontalLayout {
+        spacing: 9px;
+        alignment: start;
+
+        Rectangle {
+            y: (parent.height - 20px) / 2;
+            width: 36px;
+            height: 20px;
+            border-radius: 10px;
+            background: root.checked ? Theme.accent : Theme.neutral;
+            animate background { duration: 130ms; }
+
+            Rectangle {
+                width: 14px;
+                height: 14px;
+                border-radius: 7px;
+                background: #ffffff;
+                y: 3px;
+                x: root.checked ? 19px : 3px;
+                animate x { duration: 130ms; easing: ease-out; }
+            }
+        }
+
+        Text {
+            text: root.text;
+            color: Theme.text;
+            font-size: Theme.fs;
+            vertical-alignment: center;
+        }
+    }
+
+    TouchArea {
+        mouse-cursor: MouseCursor.pointer;
+        clicked => {
+            root.checked = !root.checked;
+            root.toggled();
+        }
+    }
+}
+
+// ---------------------------------------------------------------- misc
+
+export component Card inherits Rectangle {
+    background: Theme.panel;
+    border-radius: Theme.radius;
+    border-width: 1px;
+    border-color: Theme.border;
+}
+
+export component Badge inherits Rectangle {
+    in property <string> text;
+    in property <color> tint: Theme.accent;
+
+    height: 18px;
+    width: lbl.preferred-width + 14px;
+    border-radius: 9px;
+    background: root.tint.with-alpha(0.18);
+    border-width: 1px;
+    border-color: root.tint.with-alpha(0.5);
+
+    lbl := Text {
+        text: root.text;
+        color: root.tint;
+        font-size: Theme.fs-xs;
+        font-weight: 600;
+        vertical-alignment: center;
+        horizontal-alignment: center;
+    }
+}
+
+export component Progress inherits Rectangle {
+    in property <float> value; // 0..1
+    in property <bool> indeterminate: false;
+
+    height: 6px;
+    border-radius: 3px;
+    background: Theme.neutral;
+    clip: true;
+
+    Rectangle {
+        x: 0;
+        width: parent.width * clamp(root.value, 0.0, 1.0);
+        height: parent.height;
+        border-radius: 3px;
+        background: @linear-gradient(90deg, Theme.accent 0%, Theme.ely 100%);
+        animate width { duration: 180ms; easing: ease-out; }
+    }
+}
+
+export component Separator inherits Rectangle {
+    height: 1px;
+    background: Theme.border;
+}
+
+// Simple avatar: either the rendered skin head or a coloured initial.
+export component Avatar inherits Rectangle {
+    in property <image> head;
+    in property <bool> has-head;
+    in property <string> initial;
+    in property <length> size: 34px;
+
+    width: root.size;
+    height: root.size;
+    border-radius: Theme.radius-sm;
+    background: Theme.accent.with-alpha(0.22);
+    clip: true;
+
+    if root.has-head: Image {
+        source: root.head;
+        width: 100%;
+        height: 100%;
+        image-rendering: pixelated;
+        image-fit: contain;
+    }
+
+    if !root.has-head: Text {
+        text: root.initial;
+        color: Theme.accent;
+        font-size: root.size / 2.2;
+        font-weight: 700;
+        vertical-alignment: center;
+        horizontal-alignment: center;
+    }
+}

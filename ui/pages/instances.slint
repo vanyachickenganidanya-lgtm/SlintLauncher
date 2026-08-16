@@ -1,0 +1,209 @@
+import { ScrollView } from "std-widgets.slint";
+import { Theme } from "../theme.slint";
+import { Tr } from "../strings.slint";
+import { InstanceItem } from "../types.slint";
+import { Btn, IconBtn, Card, Badge, Separator } from "../widgets.slint";
+
+component InstanceTile inherits Rectangle {
+    in property <InstanceItem> item;
+    in property <bool> selected;
+    callback clicked();
+    callback play();
+    callback open-folder();
+    callback remove();
+
+    height: 76px;
+    border-radius: Theme.radius;
+    border-width: 1px;
+    border-color: root.selected ? Theme.accent : Theme.border;
+    background: root.selected ? Theme.panel-hover : (touch.has-hover ? Theme.panel-hover : Theme.panel);
+    animate background, border-color { duration: 110ms; }
+
+    touch := TouchArea {
+        mouse-cursor: MouseCursor.pointer;
+        clicked => { root.clicked(); }
+    }
+
+    HorizontalLayout {
+        padding: 12px;
+        spacing: 12px;
+
+        // generated "pack icon"
+        Rectangle {
+            width: 52px;
+            height: 52px;
+            y: (parent.height - 52px) / 2;
+            border-radius: Theme.radius-sm;
+            background: @linear-gradient(135deg,
+                Colors.hsv(root.item.hue, 0.55, 0.85) 0%,
+                Colors.hsv(root.item.hue > 320 ? root.item.hue - 320 : root.item.hue + 40, 0.65, 0.55) 100%);
+
+            Text {
+                text: root.item.icon-text;
+                color: #ffffff;
+                font-size: 22px;
+                font-weight: 800;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+                width: 100%;
+                height: 100%;
+                overflow: clip;
+            }
+        }
+
+        VerticalLayout {
+            spacing: 3px;
+            alignment: center;
+            horizontal-stretch: 1;
+
+            Text {
+                text: root.item.name;
+                color: Theme.text;
+                font-size: Theme.fs-big;
+                font-weight: 700;
+                overflow: elide;
+            }
+
+            HorizontalLayout {
+                spacing: 6px;
+                alignment: start;
+
+                Badge {
+                    text: root.item.version;
+                    tint: Theme.accent;
+                }
+
+                Badge {
+                    text: root.item.running ? Tr.running
+                        : (root.item.installed ? Tr.installed : Tr.not-installed);
+                    tint: root.item.running ? Theme.warn
+                        : (root.item.installed ? Theme.ok : Theme.text-faint);
+                }
+            }
+
+            Text {
+                text: root.item.last-played == ""
+                    ? Tr.never-played
+                    : Tr.last-played + " " + root.item.last-played;
+                color: Theme.text-faint;
+                font-size: Theme.fs-xs;
+            }
+        }
+
+        HorizontalLayout {
+            spacing: 4px;
+            alignment: center;
+
+            IconBtn {
+                glyph: "📁";
+                clicked => { root.open-folder(); }
+            }
+
+            IconBtn {
+                glyph: "🗑";
+                fg: Theme.danger;
+                clicked => { root.remove(); }
+            }
+
+            Btn {
+                text: root.item.running ? "▶ " + Tr.running : "▶ " + Tr.play;
+                tint: Theme.ely;
+                enabled: !root.item.running;
+                clicked => { root.play(); }
+            }
+        }
+    }
+}
+
+export component InstancesPage inherits Rectangle {
+    in property <[InstanceItem]> instances;
+    in-out property <string> selected-id;
+    in property <bool> busy;
+    callback play(string);
+    callback open-folder(string);
+    callback remove(string);
+    callback new-instance();
+
+    background: transparent;
+
+    VerticalLayout {
+        spacing: 12px;
+
+        HorizontalLayout {
+            spacing: 10px;
+
+            VerticalLayout {
+                horizontal-stretch: 1;
+                alignment: center;
+                spacing: 2px;
+
+                Text {
+                    text: Tr.instances-title;
+                    color: Theme.text;
+                    font-size: Theme.fs-title;
+                    font-weight: 700;
+                }
+
+                Text {
+                    text: "\{root.instances.length}" + (Tr.ru ? " шт." : " total");
+                    color: Theme.text-faint;
+                    font-size: Theme.fs-sm;
+                }
+            }
+
+            Btn {
+                text: "＋ " + Tr.add-instance;
+                y: (parent.height - self.height) / 2;
+                clicked => { root.new-instance(); }
+            }
+        }
+
+        if root.instances.length == 0: Card {
+            vertical-stretch: 1;
+
+            VerticalLayout {
+                alignment: center;
+                spacing: 10px;
+
+                Text {
+                    text: "🧱";
+                    font-size: 44px;
+                    horizontal-alignment: center;
+                }
+
+                Text {
+                    text: Tr.no-instances;
+                    color: Theme.text-dim;
+                    font-size: Theme.fs-big;
+                    horizontal-alignment: center;
+                }
+
+                HorizontalLayout {
+                    alignment: center;
+                    Btn {
+                        text: "＋ " + Tr.add-instance;
+                        clicked => { root.new-instance(); }
+                    }
+                }
+            }
+        }
+
+        if root.instances.length > 0: ScrollView {
+            vertical-stretch: 1;
+
+            VerticalLayout {
+                spacing: 8px;
+                padding-right: 6px;
+
+                for it in root.instances: InstanceTile {
+                    item: it;
+                    selected: it.id == root.selected-id;
+                    clicked => { root.selected-id = it.id; }
+                    play => { root.selected-id = it.id; root.play(it.id); }
+                    open-folder => { root.open-folder(it.id); }
+                    remove => { root.remove(it.id); }
+                }
+            }
+        }
+    }
+}
