@@ -19,7 +19,7 @@ ureq = { version = "2", features = ["json"] }
 anyhow = "1"
 sha1 = "0.10"
 hex = "0.4"
-zip = "2"
+zip = { version = "2", default-features = false, features = ["deflate"] }
 rayon = "1"
 dirs = "5"
 uuid = { version = "1", features = ["v4"] }

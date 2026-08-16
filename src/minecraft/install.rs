@@ -226,8 +226,8 @@ pub fn install_version(paths: &Paths, detail: &VersionDetail, report: &Reporter)
         } else if let (Some(base), Some(rel)) = (lib.url.as_ref(), maven_to_path(&lib.name)) {
             // Legacy/modded style: base URL + maven path.
             jobs.push(Job {
-                url: format!("{}{}", base.trim_end_matches('/'), format!("/{rel}")),
-                dest: paths.libraries().join(rel),
+                url: format!("{}/{}", base.trim_end_matches('/'), rel),
+                dest: paths.libraries().join(&rel),
                 sha1: None,
                 size: None,
             });
