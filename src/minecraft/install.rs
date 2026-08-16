@@ -13,6 +13,11 @@ use std::sync::Arc;
 /// Progress reporting back to the UI thread.
 pub type Reporter = Arc<dyn Fn(&str, f32) + Send + Sync>;
 
+/// Convenience so call sites read naturally regardless of the smart pointer.
+fn notify(report: &Reporter, text: &str, progress: f32) {
+    (**report)(text, progress);
+}
+
 pub struct Paths {
     pub root: PathBuf,
 }
@@ -239,7 +244,7 @@ pub fn install_version(paths: &Paths, detail: &VersionDetail, report: &Reporter)
     let mut asset_index_data: Option<(String, AssetIndex)> = None;
     if let Some(index_ref) = &detail.asset_index {
         let index_path = paths.asset_indexes().join(format!("{}.json", index_ref.id));
-        report("Скачивание индекса ресурсов / Fetching asset index", 0.02);
+        notify(report, "Скачивание индекса ресурсов / Fetching asset index", 0.02);
         download(
             &agent(),
             &index_ref.url,
@@ -273,7 +278,7 @@ pub fn install_version(paths: &Paths, detail: &VersionDetail, report: &Reporter)
 
     let total = pending.len();
     if total > 0 {
-        report(&format!("Загрузка файлов: 0/{total}"), 0.0);
+        notify(report, &format!("Загрузка файлов: 0/{total}"), 0.0);
         let done = AtomicUsize::new(0);
         let agent = agent();
 
@@ -285,7 +290,8 @@ pub fn install_version(paths: &Paths, detail: &VersionDetail, report: &Reporter)
                     .with_context(|| format!("downloading {}", job.url));
                 let n = done.fetch_add(1, Ordering::Relaxed) + 1;
                 if n % 8 == 0 || n == total {
-                    report(
+                    notify(
+                        report,
                         &format!("Загрузка файлов / Downloading: {n}/{total}"),
                         n as f32 / total as f32,
                     );
@@ -306,7 +312,7 @@ pub fn install_version(paths: &Paths, detail: &VersionDetail, report: &Reporter)
     // Legacy versions read assets from a flat directory instead of the hashed store.
     if let Some((index_id, index)) = asset_index_data {
         if index.is_virtual || index.map_to_resources {
-            report("Подготовка ресурсов / Preparing legacy assets", 0.97);
+            notify(report, "Подготовка ресурсов / Preparing legacy assets", 0.97);
             let target = if index.map_to_resources {
                 paths.root.join("resources")
             } else {
@@ -325,7 +331,7 @@ pub fn install_version(paths: &Paths, detail: &VersionDetail, report: &Reporter)
     }
 
     extract_natives(paths, detail)?;
-    report("Готово / Done", 1.0);
+    notify(report, "Готово / Done", 1.0);
     Ok(())
 }
 
