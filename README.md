@@ -1,5 +1,7 @@
 # SlintLauncher
 
+[![CI](https://github.com/vanyachickenganidanya-lgtm/SlintLauncher/actions/workflows/ci.yml/badge.svg)](https://github.com/vanyachickenganidanya-lgtm/SlintLauncher/actions/workflows/ci.yml)
+
 Быстрый нативный лаунчер Minecraft на **Rust + Slint**.
 
 Тёмная оболочка, изолированные инстансы, ваниль и Fabric, офлайн- и Microsoft-аккаунты, параллельная загрузка клиента, библиотек и ассетов с проверкой SHA-1.
@@ -34,6 +36,8 @@ cargo run --release
 ```
 
 Бинарник: `target/release/slintlauncher`.
+
+CI (GitHub Actions) на каждый пуш собирает Linux / Windows / macOS и прогоняет `cargo test --lib`. Готовые архивы лежат во вкладке **Actions → Artifacts**. Релиз по тегу `v*` публикует те же бинарники.
 
 ## Как играть
 
