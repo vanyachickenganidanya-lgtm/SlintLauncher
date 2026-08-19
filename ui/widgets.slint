@@ -1,0 +1,177 @@
+import { Theme } from "theme.slint";
+
+export component NavButton inherits Rectangle {
+    in property <string> label;
+    in property <string> glyph;
+    in property <bool> active;
+    callback clicked;
+    height: 42px;
+    border-radius: 11px;
+    background: active ? Theme.accent-soft : transparent;
+    border-width: 1px;
+    border-color: active ? #3ee08a44 : transparent;
+
+    HorizontalLayout {
+        padding-left: 12px;
+        padding-right: 12px;
+        spacing: 10px;
+        alignment: start;
+
+        Text {
+            text: glyph;
+            color: active ? Theme.accent : Theme.muted;
+            font-size: 15px;
+            vertical-alignment: center;
+            width: 22px;
+        }
+
+        Text {
+            text: label;
+            color: active ? Theme.text : Theme.muted;
+            font-size: 14px;
+            font-weight: 600;
+            vertical-alignment: center;
+        }
+    }
+
+    ta := TouchArea {
+        clicked => { root.clicked(); }
+    }
+
+    animate background { duration: 120ms; }
+}
+
+export component Pill inherits Rectangle {
+    in property <string> text;
+    in property <bool> active;
+    callback clicked;
+    height: 30px;
+    border-radius: 999px;
+    background: active ? Theme.accent : Theme.card;
+    border-width: 1px;
+    border-color: active ? Theme.accent : Theme.line;
+    horizontal-stretch: 0;
+    min-width: 86px;
+
+    Text {
+        text: text;
+        color: active ? #04140c : Theme.muted;
+        font-size: 12px;
+        font-weight: 700;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+
+    TouchArea { clicked => { root.clicked(); } }
+}
+
+export component GhostButton inherits Rectangle {
+    in property <string> text;
+    in property <bool> danger: false;
+    callback clicked;
+    height: 38px;
+    border-radius: 10px;
+    background: ta.has-hover ? Theme.card-hover : Theme.card;
+    border-width: 1px;
+    border-color: danger ? #ff6b6b55 : Theme.line;
+    min-width: 110px;
+
+    Text {
+        text: text;
+        color: danger ? Theme.danger : Theme.text;
+        font-size: 13px;
+        font-weight: 600;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+
+    ta := TouchArea { clicked => { root.clicked(); } }
+}
+
+export component PrimaryButton inherits Rectangle {
+    in property <string> text;
+    in property <bool> enabled: true;
+    callback clicked;
+    height: 52px;
+    border-radius: 14px;
+    background: !enabled ? #1f8a5544 : (ta.has-hover ? #4af09a : Theme.accent);
+    min-width: 180px;
+
+    Text {
+        text: text;
+        color: enabled ? #04140c : #8fd9b3;
+        font-size: 16px;
+        font-weight: 800;
+        letter-spacing: 0.4px;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+
+    ta := TouchArea {
+        enabled: root.enabled;
+        clicked => { root.clicked(); }
+    }
+
+    animate background { duration: 120ms; }
+}
+
+export component Field inherits Rectangle {
+    in-out property <string> text;
+    in property <string> placeholder;
+    in property <bool> enabled: true;
+    callback edited;
+    height: 42px;
+    border-radius: 11px;
+    background: Theme.bg;
+    border-width: 1px;
+    border-color: input.has-focus ? Theme.accent : Theme.line;
+
+    if text == "": Text {
+        x: 12px;
+        text: placeholder;
+        color: Theme.faint;
+        font-size: 14px;
+        vertical-alignment: center;
+        height: 100%;
+    }
+
+    HorizontalLayout {
+        padding-left: 12px;
+        padding-right: 12px;
+
+        input := TextInput {
+            text <=> root.text;
+            color: Theme.text;
+            font-size: 14px;
+            vertical-alignment: center;
+            single-line: true;
+            enabled: root.enabled;
+            edited => { root.edited(); }
+        }
+    }
+}
+
+export component Meter inherits Rectangle {
+    in property <float> value;
+    height: 8px;
+    border-radius: 99px;
+    background: #0b1018;
+    clip: true;
+
+    Rectangle {
+        width: parent.width * max(0, min(1, value));
+        height: 100%;
+        border-radius: 99px;
+        background: @linear-gradient(90deg, Theme.accent-dim 0%, Theme.accent 100%);
+        animate width { duration: 160ms; }
+    }
+}
+
+export component SectionTitle inherits Text {
+    in property <string> caption;
+    text: caption;
+    color: Theme.faint;
+    font-size: 11px;
+    font-weight: 800;
+    letter-spacing: 1.2px;
+}
