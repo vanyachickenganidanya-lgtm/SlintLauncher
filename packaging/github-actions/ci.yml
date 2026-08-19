@@ -1,0 +1,66 @@
+# Copy this file to .github/workflows/ci.yml
+# (the Arena GitHub App cannot push workflow files without the `workflows` scope)
+name: CI
+
+on:
+  push:
+    branches: [main, "arena/**"]
+  pull_request:
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+  CARGO_INCREMENTAL: 0
+
+jobs:
+  test:
+    name: ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            artifact: slintlauncher-linux-x64
+          - os: windows-latest
+            artifact: slintlauncher-windows-x64
+          - os: macos-latest
+            artifact: slintlauncher-macos-arm64
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build & test
+        id: slint
+        uses: ./
+
+      - name: Package Linux / macOS
+        if: runner.os != 'Windows'
+        run: |
+          mkdir -p dist
+          cp "${{ steps.slint.outputs.binary }}" "dist/${{ matrix.artifact }}"
+          chmod +x "dist/${{ matrix.artifact }}"
+          cp README.md LICENSE dist/
+          tar -czf "${{ matrix.artifact }}.tar.gz" -C dist .
+          ls -lh "${{ matrix.artifact }}.tar.gz"
+
+      - name: Package Windows
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force dist | Out-Null
+          Copy-Item "${{ steps.slint.outputs.binary }}" "dist/${{ matrix.artifact }}.exe"
+          Copy-Item README.md, LICENSE dist/
+          Compress-Archive -Path dist\* -DestinationPath "${{ matrix.artifact }}.zip"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: |
+            *.tar.gz
+            *.zip
+          if-no-files-found: error

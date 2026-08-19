@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=SlintLauncher
+Comment=Minecraft launcher built with Rust and Slint
+Exec=slintlauncher
+Icon=slintlauncher
+Terminal=false
+Categories=Game;
+StartupWMClass=slintlauncher

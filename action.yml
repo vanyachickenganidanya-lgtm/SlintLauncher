@@ -1,0 +1,66 @@
+name: SlintLauncher
+description: Build and test the Rust + Slint Minecraft launcher
+author: SlintLauncher contributors
+branding:
+  icon: play
+  color: green
+
+inputs:
+  profile:
+    description: Cargo profile to build (dev or release)
+    required: false
+    default: release
+  test:
+    description: Run cargo test --lib before the build
+    required: false
+    default: "true"
+
+outputs:
+  binary:
+    description: Path to the built slintlauncher binary
+    value: ${{ steps.build.outputs.binary }}
+
+runs:
+  using: composite
+  steps:
+    - name: Linux packages for Slint
+      if: runner.os == 'Linux'
+      shell: bash
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y --no-install-recommends \
+          build-essential pkg-config cmake \
+          libfontconfig1-dev libxkbcommon-dev \
+          libxcb1-dev libxcb-render0-dev \
+          libxcb-shape0-dev libxcb-xfixes0-dev \
+          libxcb-xkb-dev libxkbcommon-x11-dev \
+          libwayland-dev
+
+    - name: Install Rust
+      uses: dtolnay/rust-toolchain@stable
+
+    - name: Cache cargo
+      uses: Swatinem/rust-cache@v2
+
+    - name: Test
+      if: inputs.test == 'true'
+      shell: bash
+      run: cargo test --lib --verbose
+
+    - name: Build
+      id: build
+      shell: bash
+      run: |
+        if [ "${{ inputs.profile }}" = "dev" ]; then
+          cargo build --verbose
+          dir=target/debug
+        else
+          cargo build --release --verbose
+          dir=target/release
+        fi
+        if [ -f "$dir/slintlauncher.exe" ]; then
+          echo "binary=$dir/slintlauncher.exe" >> "$GITHUB_OUTPUT"
+        else
+          echo "binary=$dir/slintlauncher" >> "$GITHUB_OUTPUT"
+        fi
+        ls -lh "$dir"/slintlauncher*

@@ -1,0 +1,884 @@
+import { Theme } from "theme.slint";
+import { NavButton, Pill, GhostButton, PrimaryButton, Field, Meter, SectionTitle } from "widgets.slint";
+
+export struct VersionRow {
+    id: string,
+    kind: string,
+    date: string,
+    installed: bool,
+    selected: bool,
+}
+
+export struct InstanceRow {
+    id: string,
+    name: string,
+    version: string,
+    loader: string,
+    last-played: string,
+    selected: bool,
+}
+
+export struct AccountRow {
+    id: string,
+    name: string,
+    kind: string,
+    selected: bool,
+}
+
+export struct NewsRow {
+    title: string,
+    body: string,
+    version: string,
+}
+
+export component AppWindow inherits Window {
+    title: "SlintLauncher";
+    icon: @image-url("assets/icon.png");
+    min-width: 1120px;
+    min-height: 700px;
+    preferred-width: 1320px;
+    preferred-height: 840px;
+    background: Theme.bg;
+    default-font-family: "Inter, Segoe UI, Ubuntu, Noto Sans, sans-serif";
+    default-font-size: 14px;
+
+    in-out property <int> page: 0;
+    in-out property <bool> busy: false;
+    in-out property <float> progress: 0.0;
+    in-out property <string> progress-text: "";
+    in-out property <string> status: "Загрузка манифеста…";
+    in-out property <string> error-text: "";
+    in-out property <string> java-label: "Java не найдена";
+    in-out property <string> data-dir: "";
+    in-out property <string> play-label: "Играть";
+
+    in-out property <string> hero-version: "—";
+    in-out property <string> hero-instance: "Ванилла";
+    in-out property <string> hero-account: "Player";
+    in-out property <string> hero-loader: "Vanilla";
+    in-out property <int> ram-mb: 4096;
+    in-out property <string> java-path: "";
+    in-out property <string> jvm-args: "";
+    in-out property <string> width-text: "1280";
+    in-out property <string> height-text: "720";
+    in-out property <bool> fullscreen: false;
+    in-out property <bool> close-on-launch: false;
+    in-out property <bool> show-snapshots: false;
+    in-out property <bool> show-old: false;
+
+    in-out property <string> version-query: "";
+    in-out property <int> version-filter: 0;
+    in-out property <[VersionRow]> versions: [];
+    in-out property <[InstanceRow]> instances: [];
+    in-out property <[AccountRow]> accounts: [];
+    in-out property <[NewsRow]> news: [];
+
+    in-out property <bool> show-create: false;
+    in-out property <string> new-name: "Новый мир";
+    in-out property <string> new-version: "latest-release";
+    in-out property <int> new-loader: 0;
+
+    in-out property <string> offline-name: "Player";
+    in-out property <bool> msa-pending: false;
+    in-out property <string> msa-code: "";
+    in-out property <string> msa-url: "https://www.microsoft.com/link";
+
+    callback play();
+    callback refresh();
+    callback apply-filter();
+    callback select-page(int);
+    callback select-version(string);
+    callback select-instance(string);
+    callback select-account(string);
+    callback save-settings();
+    callback create-instance();
+    callback delete-instance();
+    callback add-offline();
+    callback start-msa();
+    callback cancel-msa();
+    callback delete-account();
+    callback open-folder(string);
+    callback open-msa-link();
+
+    VerticalLayout {
+        padding: 0;
+        spacing: 0;
+
+        HorizontalLayout {
+            spacing: 0;
+
+            sidebar := Rectangle {
+                width: Theme.sidebar;
+                background: Theme.bg-elevated;
+                border-width: 0 1px 0 0;
+                border-color: Theme.line;
+
+                VerticalLayout {
+                    padding: 22px 16px 16px;
+                    spacing: 18px;
+
+                    HorizontalLayout {
+                        spacing: 10px;
+                        height: 42px;
+
+                        Image {
+                            source: @image-url("assets/icon.png");
+                            width: 36px;
+                            height: 36px;
+                        }
+
+                        VerticalLayout {
+                            spacing: 1px;
+                            alignment: center;
+                            Text {
+                                text: "SLINT";
+                                color: Theme.text;
+                                font-size: 15px;
+                                font-weight: 900;
+                                letter-spacing: 2px;
+                            }
+                            Text {
+                                text: "LAUNCHER";
+                                color: Theme.accent;
+                                font-size: 10px;
+                                font-weight: 800;
+                                letter-spacing: 2.4px;
+                            }
+                        }
+                    }
+
+                    Rectangle { height: 1px; background: Theme.line; }
+
+                    VerticalLayout {
+                        spacing: 6px;
+                        NavButton { label: "Играть"; glyph: "▶"; active: page == 0; clicked => { select-page(0); } }
+                        NavButton { label: "Версии"; glyph: "▣"; active: page == 1; clicked => { select-page(1); } }
+                        NavButton { label: "Инстансы"; glyph: "▤"; active: page == 2; clicked => { select-page(2); } }
+                        NavButton { label: "Новости"; glyph: "✦"; active: page == 3; clicked => { select-page(3); } }
+                        NavButton { label: "Аккаунты"; glyph: "☺"; active: page == 4; clicked => { select-page(4); } }
+                        NavButton { label: "Настройки"; glyph: "⚙"; active: page == 5; clicked => { select-page(5); } }
+                    }
+
+                    Rectangle { vertical-stretch: 1; background: transparent; }
+
+                    Rectangle {
+                        border-radius: 14px;
+                        background: Theme.card;
+                        border-width: 1px;
+                        border-color: Theme.line;
+
+                        VerticalLayout {
+                            padding: 12px;
+                            spacing: 6px;
+                            Text {
+                                text: hero-account;
+                                color: Theme.text;
+                                font-weight: 700;
+                                font-size: 14px;
+                            }
+                            Text {
+                                text: "активный профиль";
+                                color: Theme.faint;
+                                font-size: 11px;
+                            }
+                        }
+                    }
+                }
+            }
+
+            Rectangle {
+                background: Theme.bg;
+
+                VerticalLayout {
+                    padding: 22px 26px 16px;
+                    spacing: 16px;
+
+                    if page == 0: play-page := PlayPage {
+                        hero-version: hero-version;
+                        hero-instance: hero-instance;
+                        hero-account: hero-account;
+                        hero-loader: hero-loader;
+                        ram-mb: ram-mb;
+                        java-label: java-label;
+                        play-label: play-label;
+                        busy: busy;
+                        progress: progress;
+                        progress-text: progress-text;
+                        error-text: error-text;
+                        play => { root.play(); }
+                        open-game => { root.open-folder("game"); }
+                        open-mods => { root.open-folder("mods"); }
+                        open-saves => { root.open-folder("saves"); }
+                    }
+
+                    if page == 1: VersionsPage {
+                        query <=> version-query;
+                        filter: version-filter;
+                        versions: versions;
+                        busy: busy;
+                        filter-changed(v) => { version-filter = v; root.apply-filter(); }
+                        pick(id) => { root.select-version(id); }
+                        refresh => { root.refresh(); }
+                        apply-filter => { root.apply-filter(); }
+                    }
+
+                    if page == 2: InstancesPage {
+                        instances: instances;
+                        show-create: show-create;
+                        new-name <=> new-name;
+                        new-version <=> new-version;
+                        new-loader <=> new-loader;
+                        pick(id) => { root.select-instance(id); }
+                        toggle-create => { show-create = !show-create; }
+                        create => { root.create-instance(); }
+                        delete => { root.delete-instance(); }
+                    }
+
+                    if page == 3: NewsPage { news: news; }
+
+                    if page == 4: AccountsPage {
+                        accounts: accounts;
+                        offline-name <=> offline-name;
+                        msa-pending: msa-pending;
+                        msa-code: msa-code;
+                        msa-url: msa-url;
+                        pick(id) => { root.select-account(id); }
+                        add-offline => { root.add-offline(); }
+                        start-msa => { root.start-msa(); }
+                        cancel-msa => { root.cancel-msa(); }
+                        delete-account => { root.delete-account(); }
+                        open-msa => { root.open-msa-link(); }
+                    }
+
+                    if page == 5: SettingsPage {
+                        ram-mb <=> ram-mb;
+                        java-path <=> java-path;
+                        jvm-args <=> jvm-args;
+                        width-text <=> width-text;
+                        height-text <=> height-text;
+                        fullscreen <=> fullscreen;
+                        close-on-launch <=> close-on-launch;
+                        show-snapshots <=> show-snapshots;
+                        show-old <=> show-old;
+                        data-dir: data-dir;
+                        java-label: java-label;
+                        save => { root.save-settings(); }
+                        open-data => { root.open-folder("data"); }
+                    }
+                }
+            }
+        }
+
+        Rectangle {
+            height: 36px;
+            background: #05070b;
+            border-width: 1px 0 0 0;
+            border-color: Theme.line;
+
+            HorizontalLayout {
+                padding-left: 18px;
+                padding-right: 18px;
+                spacing: 16px;
+
+                Text {
+                    text: status;
+                    color: Theme.muted;
+                    font-size: 12px;
+                    vertical-alignment: center;
+                }
+                Rectangle { horizontal-stretch: 1; background: transparent; }
+                Text {
+                    text: "Rust + Slint  ·  AGPL-3.0";
+                    color: Theme.faint;
+                    font-size: 11px;
+                    vertical-alignment: center;
+                }
+            }
+        }
+    }
+}
+
+component PlayPage inherits Rectangle {
+    vertical-stretch: 1;
+    in property <string> hero-version;
+    in property <string> hero-instance;
+    in property <string> hero-account;
+    in property <string> hero-loader;
+    in property <int> ram-mb;
+    in property <string> java-label;
+    in property <string> play-label;
+    in property <bool> busy;
+    in property <float> progress;
+    in property <string> progress-text;
+    in property <string> error-text;
+    callback play;
+    callback open-game;
+    callback open-mods;
+    callback open-saves;
+
+    VerticalLayout {
+        spacing: 16px;
+
+        Rectangle {
+            height: 248px;
+            border-radius: 22px;
+            clip: true;
+            background: Theme.card;
+
+            Image {
+                source: @image-url("assets/hero.png");
+                width: 100%;
+                height: 100%;
+                image-fit: cover;
+            }
+
+            Rectangle {
+                background: @linear-gradient(180deg, #07090e00 0%, #07090ecc 62%, #07090ef2 100%);
+            }
+
+            VerticalLayout {
+                padding: 22px 26px;
+                alignment: end;
+                spacing: 8px;
+
+                Text {
+                    text: hero-instance;
+                    color: Theme.text;
+                    font-size: 32px;
+                    font-weight: 900;
+                }
+
+                HorizontalLayout {
+                    spacing: 10px;
+                    height: 28px;
+                    Badge { text: hero-version; }
+                    Badge { text: hero-loader; tone: 1; }
+                    Badge { text: hero-account; tone: 2; }
+                    Badge { text: "\{ram-mb / 1024} ГБ RAM"; tone: 2; }
+                }
+            }
+        }
+
+        HorizontalLayout {
+            spacing: 14px;
+            height: 150px;
+
+            Rectangle {
+                border-radius: 18px;
+                background: Theme.card;
+                border-width: 1px;
+                border-color: Theme.line;
+                horizontal-stretch: 2;
+
+                VerticalLayout {
+                    padding: 18px 20px;
+                    spacing: 10px;
+
+                    SectionTitle { caption: "ЗАПУСК"; }
+
+                    HorizontalLayout {
+                        spacing: 12px;
+                        alignment: center;
+
+                        PrimaryButton {
+                            text: play-label;
+                            enabled: !busy;
+                            clicked => { play(); }
+                            horizontal-stretch: 1;
+                        }
+
+                        GhostButton { text: "Папка"; clicked => { open-game(); } }
+                        GhostButton { text: "Моды"; clicked => { open-mods(); } }
+                        GhostButton { text: "Миры"; clicked => { open-saves(); } }
+                    }
+
+                    if busy: VerticalLayout {
+                        spacing: 6px;
+                        Meter { value: progress; }
+                        Text {
+                            text: progress-text;
+                            color: Theme.muted;
+                            font-size: 12px;
+                        }
+                    }
+
+                    if error-text != "": Text {
+                        text: error-text;
+                        color: Theme.danger;
+                        font-size: 12px;
+                        wrap: word-wrap;
+                    }
+                }
+            }
+
+            Rectangle {
+                border-radius: 18px;
+                background: Theme.card;
+                border-width: 1px;
+                border-color: Theme.line;
+                width: 280px;
+
+                VerticalLayout {
+                    padding: 18px 20px;
+                    spacing: 10px;
+                    SectionTitle { caption: "СРЕДА"; }
+                    InfoLine { k: "Java"; v: java-label; }
+                    InfoLine { k: "Память"; v: "\{ram-mb} МБ"; }
+                    InfoLine { k: "Загрузчик"; v: hero-loader; }
+                    Text {
+                        text: "Офлайн-аккаунт играет на пиратских и LAN-серверах. Microsoft нужен для лицензионных серверов.";
+                        color: Theme.faint;
+                        font-size: 11px;
+                        wrap: word-wrap;
+                    }
+                }
+            }
+        }
+    }
+}
+
+component Badge inherits Rectangle {
+    in property <string> text;
+    in property <int> tone: 0;
+    height: 26px;
+    border-radius: 999px;
+    background: tone == 0 ? Theme.accent-soft : #ffffff12;
+    border-width: 1px;
+    border-color: tone == 0 ? #3ee08a55 : #ffffff18;
+    horizontal-stretch: 0;
+    min-width: 70px;
+
+    HorizontalLayout {
+        padding-left: 10px;
+        padding-right: 10px;
+        Text {
+            text: text;
+            color: tone == 0 ? Theme.accent : Theme.text;
+            font-size: 12px;
+            font-weight: 700;
+            vertical-alignment: center;
+        }
+    }
+}
+
+component InfoLine inherits HorizontalLayout {
+    in property <string> k;
+    in property <string> v;
+    spacing: 8px;
+    Text { text: k; color: Theme.faint; font-size: 12px; width: 86px; }
+    Text { text: v; color: Theme.text; font-size: 12px; font-weight: 600; wrap: word-wrap; }
+}
+
+component VersionsPage inherits Rectangle {
+    vertical-stretch: 1;
+    in-out property <string> query;
+    in property <int> filter;
+    in property <[VersionRow]> versions;
+    in property <bool> busy;
+    callback filter-changed(int);
+    callback pick(string);
+    callback refresh;
+    callback apply-filter;
+
+    VerticalLayout {
+        spacing: 12px;
+
+        HorizontalLayout {
+            spacing: 10px;
+            height: 42px;
+            Text {
+                text: "Каталог версий";
+                color: Theme.text;
+                font-size: 22px;
+                font-weight: 800;
+                vertical-alignment: center;
+            }
+            Rectangle { horizontal-stretch: 1; }
+            GhostButton { text: "Обновить"; clicked => { refresh(); } }
+        }
+
+        HorizontalLayout {
+            spacing: 8px;
+            height: 42px;
+            Field {
+                text <=> query;
+                placeholder: "Поиск 1.21, 1.16.5…";
+                horizontal-stretch: 1;
+                edited => { refresh(); }
+            }
+            Pill { text: "Релизы"; active: filter == 0; clicked => { filter-changed(0); } }
+            Pill { text: "Снимки"; active: filter == 1; clicked => { filter-changed(1); } }
+            Pill { text: "Старые"; active: filter == 2; clicked => { filter-changed(2); } }
+            Pill { text: "Все"; active: filter == 3; clicked => { filter-changed(3); } }
+        }
+
+        Rectangle {
+            border-radius: 16px;
+            background: Theme.card;
+            border-width: 1px;
+            border-color: Theme.line;
+
+            ListView {
+                for row[index] in versions: Rectangle {
+                    height: 56px;
+                    background: row.selected ? Theme.accent-soft : (ta.has-hover ? Theme.card-hover : transparent);
+
+                    HorizontalLayout {
+                        padding-left: 16px;
+                        padding-right: 16px;
+                        spacing: 14px;
+
+                        Text {
+                            text: row.id;
+                            color: Theme.text;
+                            font-size: 15px;
+                            font-weight: 700;
+                            vertical-alignment: center;
+                            width: 180px;
+                        }
+                        Badge { text: row.kind; }
+                        Text {
+                            text: row.date;
+                            color: Theme.muted;
+                            font-size: 13px;
+                            vertical-alignment: center;
+                        }
+                        Rectangle { horizontal-stretch: 1; }
+                        if row.installed: Text {
+                            text: "установлена";
+                            color: Theme.accent;
+                            font-size: 12px;
+                            font-weight: 700;
+                            vertical-alignment: center;
+                        }
+                    }
+
+                    ta := TouchArea {
+                        clicked => { pick(row.id); }
+                    }
+                }
+            }
+        }
+    }
+}
+
+component InstancesPage inherits Rectangle {
+    vertical-stretch: 1;
+    in property <[InstanceRow]> instances;
+    in property <bool> show-create;
+    in-out property <string> new-name;
+    in-out property <string> new-version;
+    in-out property <int> new-loader;
+    callback pick(string);
+    callback toggle-create;
+    callback create;
+    callback delete;
+
+    VerticalLayout {
+        spacing: 12px;
+
+        HorizontalLayout {
+            height: 42px;
+            Text {
+                text: "Инстансы";
+                color: Theme.text;
+                font-size: 22px;
+                font-weight: 800;
+                vertical-alignment: center;
+            }
+            Rectangle { horizontal-stretch: 1; }
+            GhostButton { text: show-create ? "Закрыть" : "Создать"; clicked => { toggle-create(); } }
+            GhostButton { text: "Удалить"; danger: true; clicked => { delete(); } }
+        }
+
+        if show-create: Rectangle {
+            height: 86px;
+            border-radius: 16px;
+            background: Theme.card;
+            border-width: 1px;
+            border-color: Theme.line;
+
+            HorizontalLayout {
+                padding: 16px;
+                spacing: 10px;
+                Field { text <=> new-name; placeholder: "Имя"; width: 220px; }
+                Field { text <=> new-version; placeholder: "Версия (1.21.8 или latest-release)"; }
+                Pill { text: "Vanilla"; active: new-loader == 0; clicked => { new-loader = 0; } }
+                Pill { text: "Fabric"; active: new-loader == 1; clicked => { new-loader = 1; } }
+                PrimaryButton { text: "Добавить"; width: 140px; height: 42px; clicked => { create(); } }
+            }
+        }
+
+        Rectangle {
+            border-radius: 16px;
+            background: Theme.card;
+            border-width: 1px;
+            border-color: Theme.line;
+
+            ListView {
+                for row in instances: Rectangle {
+                    height: 64px;
+                    background: row.selected ? Theme.accent-soft : (ta.has-hover ? Theme.card-hover : transparent);
+                    HorizontalLayout {
+                        padding-left: 16px;
+                        padding-right: 16px;
+                        spacing: 16px;
+                        VerticalLayout {
+                            alignment: center;
+                            spacing: 2px;
+                            Text { text: row.name; color: Theme.text; font-weight: 800; font-size: 15px; }
+                            Text { text: row.version + "  ·  " + row.loader; color: Theme.muted; font-size: 12px; }
+                        }
+                        Rectangle { horizontal-stretch: 1; }
+                        Text {
+                            text: row.last-played;
+                            color: Theme.faint;
+                            font-size: 12px;
+                            vertical-alignment: center;
+                        }
+                    }
+                    ta := TouchArea { clicked => { pick(row.id); } }
+                }
+            }
+        }
+    }
+}
+
+component NewsPage inherits Rectangle {
+    vertical-stretch: 1;
+    in property <[NewsRow]> news;
+
+    VerticalLayout {
+        spacing: 12px;
+        Text { text: "Патчноуты"; color: Theme.text; font-size: 22px; font-weight: 800; }
+
+        ListView {
+            for row in news: Rectangle {
+                height: 132px;
+                Rectangle {
+                    x: 0;
+                    y: 0;
+                    width: parent.width - 4px;
+                    height: parent.height - 10px;
+                    border-radius: 16px;
+                    background: Theme.card;
+                    border-width: 1px;
+                    border-color: Theme.line;
+
+                    VerticalLayout {
+                        padding: 16px 18px;
+                        spacing: 6px;
+                        HorizontalLayout {
+                            Text { text: row.title; color: Theme.text; font-weight: 800; font-size: 16px; }
+                            Rectangle { horizontal-stretch: 1; }
+                            if row.version != "": Badge { text: row.version; }
+                        }
+                        Text {
+                            text: row.body;
+                            color: Theme.muted;
+                            font-size: 13px;
+                            wrap: word-wrap;
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+component AccountsPage inherits Rectangle {
+    vertical-stretch: 1;
+    in property <[AccountRow]> accounts;
+    in-out property <string> offline-name;
+    in property <bool> msa-pending;
+    in property <string> msa-code;
+    in property <string> msa-url;
+    callback pick(string);
+    callback add-offline;
+    callback start-msa;
+    callback cancel-msa;
+    callback delete-account;
+    callback open-msa;
+
+    VerticalLayout {
+        spacing: 12px;
+
+        Text { text: "Аккаунты"; color: Theme.text; font-size: 22px; font-weight: 800; }
+
+        HorizontalLayout {
+            spacing: 10px;
+            height: 42px;
+            Field { text <=> offline-name; placeholder: "Ник офлайн"; width: 220px; }
+            GhostButton { text: "Добавить офлайн"; clicked => { add-offline(); } }
+            PrimaryButton { text: "Microsoft"; width: 160px; height: 42px; clicked => { start-msa(); } }
+            GhostButton { text: "Удалить"; danger: true; clicked => { delete-account(); } }
+        }
+
+        if msa-pending: Rectangle {
+            height: 92px;
+            border-radius: 16px;
+            background: Theme.card;
+            border-width: 1px;
+            border-color: Theme.gold;
+
+            HorizontalLayout {
+                padding: 16px;
+                spacing: 16px;
+                VerticalLayout {
+                    spacing: 4px;
+                    Text { text: "Войдите на " + msa-url; color: Theme.text; font-weight: 700; }
+                    Text { text: "Код:  " + msa-code; color: Theme.gold; font-size: 22px; font-weight: 900; }
+                }
+                Rectangle { horizontal-stretch: 1; }
+                GhostButton { text: "Открыть сайт"; clicked => { open-msa(); } }
+                GhostButton { text: "Отмена"; clicked => { cancel-msa(); } }
+            }
+        }
+
+        Rectangle {
+            border-radius: 16px;
+            background: Theme.card;
+            border-width: 1px;
+            border-color: Theme.line;
+
+            ListView {
+                for row in accounts: Rectangle {
+                    height: 56px;
+                    background: row.selected ? Theme.accent-soft : (ta.has-hover ? Theme.card-hover : transparent);
+                    HorizontalLayout {
+                        padding-left: 16px;
+                        padding-right: 16px;
+                        Text { text: row.name; color: Theme.text; font-weight: 800; vertical-alignment: center; }
+                        Rectangle { horizontal-stretch: 1; }
+                        Badge { text: row.kind; tone: 1; }
+                    }
+                    ta := TouchArea { clicked => { pick(row.id); } }
+                }
+            }
+        }
+    }
+}
+
+component SettingsPage inherits Rectangle {
+    vertical-stretch: 1;
+    in-out property <int> ram-mb;
+    in-out property <string> java-path;
+    in-out property <string> jvm-args;
+    in-out property <string> width-text;
+    in-out property <string> height-text;
+    in-out property <bool> fullscreen;
+    in-out property <bool> close-on-launch;
+    in-out property <bool> show-snapshots;
+    in-out property <bool> show-old;
+    in property <string> data-dir;
+    in property <string> java-label;
+    callback save;
+    callback open-data;
+
+    VerticalLayout {
+        spacing: 14px;
+
+        HorizontalLayout {
+            Text { text: "Настройки"; color: Theme.text; font-size: 22px; font-weight: 800; }
+            Rectangle { horizontal-stretch: 1; }
+            PrimaryButton { text: "Сохранить"; width: 150px; height: 42px; clicked => { save(); } }
+        }
+
+        Rectangle {
+            border-radius: 16px;
+            background: Theme.card;
+            border-width: 1px;
+            border-color: Theme.line;
+
+            VerticalLayout {
+                padding: 18px;
+                spacing: 14px;
+
+                SectionTitle { caption: "ПАМЯТЬ"; }
+                HorizontalLayout {
+                    Text { text: "\{ram-mb} МБ"; color: Theme.accent; font-weight: 800; width: 100px; vertical-alignment: center; }
+                    ram-area := TouchArea {
+                        height: 22px;
+                        horizontal-stretch: 1;
+                        moved => {
+                            if (self.pressed) {
+                                ram-mb = 1024 + 1024 * round(15 * max(0, min(1, self.mouse-x / self.width)));
+                            }
+                        }
+                        clicked => {
+                            ram-mb = 1024 + 1024 * round(15 * max(0, min(1, self.mouse-x / self.width)));
+                        }
+                        Rectangle {
+                            y: 7px;
+                            height: 8px;
+                            border-radius: 99px;
+                            background: #0b1018;
+                            Rectangle {
+                                width: parent.width * (ram-mb - 1024) / 15360;
+                                height: 100%;
+                                border-radius: 99px;
+                                background: Theme.accent;
+                            }
+                        }
+                    }
+                }
+
+                SectionTitle { caption: "JAVA"; }
+                Text { text: java-label; color: Theme.muted; font-size: 12px; }
+                Field { text <=> java-path; placeholder: "Путь к java (пусто = авто)"; }
+
+                SectionTitle { caption: "JVM"; }
+                Field { text <=> jvm-args; placeholder: "Дополнительные аргументы"; }
+
+                SectionTitle { caption: "ОКНО"; }
+                HorizontalLayout {
+                    spacing: 10px;
+                    Field { text: width-px; placeholder: "Ширина"; width: 120px; edited := Text {} }
+                    Text { text: "×"; color: Theme.muted; vertical-alignment: center; }
+                    Field { text: height-px; placeholder: "Высота"; width: 120px; }
+                    Toggle { label: "Полный экран"; checked <=> fullscreen; }
+                    Toggle { label: "Закрывать лаунчер"; checked <=> close-on-launch; }
+                }
+
+                SectionTitle { caption: "КАТАЛОГ"; }
+                HorizontalLayout {
+                    spacing: 10px;
+                    Toggle { label: "Снимки в списке"; checked <=> show-snapshots; }
+                    Toggle { label: "Альфа / бета"; checked <=> show-old; }
+                }
+
+                HorizontalLayout {
+                    Text { text: data-dir; color: Theme.faint; font-size: 12px; vertical-alignment: center; wrap: word-wrap; }
+                    Rectangle { horizontal-stretch: 1; }
+                    GhostButton { text: "Открыть данные"; clicked => { open-data(); } }
+                }
+            }
+        }
+    }
+}
+
+component Toggle inherits HorizontalLayout {
+    in property <string> label;
+    in-out property <bool> checked;
+    spacing: 8px;
+    height: 28px;
+
+    Rectangle {
+        width: 42px;
+        height: 24px;
+        border-radius: 99px;
+        background: checked ? Theme.accent : Theme.line;
+        Rectangle {
+            x: checked ? 20px : 3px;
+            y: 3px;
+            width: 18px;
+            height: 18px;
+            border-radius: 99px;
+            background: checked ? #04140c : Theme.text;
+            animate x { duration: 120ms; }
+        }
+        TouchArea { clicked => { checked = !checked; } }
+    }
+
+    Text { text: label; color: Theme.text; font-size: 13px; vertical-alignment: center; }
+}
