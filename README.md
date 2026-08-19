@@ -37,7 +37,14 @@ cargo run --release
 
 Бинарник: `target/release/slintlauncher`.
 
-CI (GitHub Actions) на каждый пуш собирает Linux / Windows / macOS и прогоняет `cargo test --lib`. Готовые архивы лежат во вкладке **Actions → Artifacts**. Релиз по тегу `v*` публикует те же бинарники.
+Репозиторий — ещё и GitHub Action (`action.yml`): ставит зависимости Slint, гоняет `cargo test --lib` и собирает бинарник.
+
+```yaml
+- uses: actions/checkout@v4
+- uses: vanyachickenganidanya-lgtm/SlintLauncher@arena/01a0187f-slintlauncher
+```
+
+Готовые workflow лежат в [`packaging/github-actions/`](packaging/github-actions). Скопируйте их в `.github/workflows/`, если у токена есть право `workflows` — тогда CI сам соберёт Linux / Windows / macOS и выложит архивы в **Actions → Artifacts**. Тег `v*` публикует релиз.
 
 ## Как играть
 

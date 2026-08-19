@@ -1,3 +1,5 @@
+# Copy this file to .github/workflows/ci.yml
+# (the Arena GitHub App cannot push workflow files without the `workflows` scope)
 name: CI
 
 on:
@@ -31,41 +33,18 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Install Linux GUI/build deps
-        if: runner.os == 'Linux'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
-            build-essential pkg-config cmake \
-            libfontconfig1-dev libxkbcommon-dev \
-            libxcb1-dev libxcb-render0-dev \
-            libxcb-shape0-dev libxcb-xfixes0-dev \
-            libxcb-xkb-dev libxkbcommon-x11-dev \
-            libwayland-dev
-
-      - name: Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Cargo cache
-        uses: Swatinem/rust-cache@v2
-        with:
-          shared-key: slintlauncher
-
-      - name: Unit tests
-        run: cargo test --lib --verbose
-
-      - name: Release build
-        run: cargo build --release --verbose
+      - name: Build & test
+        id: slint
+        uses: ./
 
       - name: Package Linux / macOS
         if: runner.os != 'Windows'
         run: |
           mkdir -p dist
-          bin="target/release/slintlauncher"
-          chmod +x "$bin"
-          cp "$bin" "dist/${{ matrix.artifact }}"
+          cp "${{ steps.slint.outputs.binary }}" "dist/${{ matrix.artifact }}"
+          chmod +x "dist/${{ matrix.artifact }}"
           cp README.md LICENSE dist/
-          (cd dist && tar -czf "../${{ matrix.artifact }}.tar.gz" .)
+          tar -czf "${{ matrix.artifact }}.tar.gz" -C dist .
           ls -lh "${{ matrix.artifact }}.tar.gz"
 
       - name: Package Windows
@@ -73,7 +52,7 @@ jobs:
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force dist | Out-Null
-          Copy-Item target/release/slintlauncher.exe "dist/${{ matrix.artifact }}.exe"
+          Copy-Item "${{ steps.slint.outputs.binary }}" "dist/${{ matrix.artifact }}.exe"
           Copy-Item README.md, LICENSE dist/
           Compress-Archive -Path dist\* -DestinationPath "${{ matrix.artifact }}.zip"
 
